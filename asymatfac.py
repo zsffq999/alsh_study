@@ -38,9 +38,26 @@ def AsyMatFac(n, r, numlabel, mu):
 	objEvaluate()
 
 	# do asymmetric loops
+	hp = np.zeros(n)
+	hq = np.zeros(n)
 	for t in xrange(10):
-		# update QH
-		pass
+		for rr in range(r):
+			hp[:] = PH[:,l+rr]
+			QH[:,l+rr] = PH[:,l+rr] = 0
+			hq = np.dot(QH, np.dot(PH.T, hp)) + _mu*hp
+			hq = np.where(hq>=0, -1, 1)
+			PH[:,l+rr] = hp
+			QH[:,l+rr] = hq
+
+		for rr in range(r):
+			hq[:] = QH[:,l+rr]
+			QH[:,l+rr] = PH[:,l+rr] = 0
+			hp = np.dot(PH, np.dot(QH.T, hq)) + _mu*hq
+			hp = np.where(hp>=0, -1, 1)
+			PH[:,l+rr] = hp
+			QH[:,l+rr] = hq
+
+		objEvaluate()
 
 
 if __name__ == '__main__':
