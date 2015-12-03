@@ -3,7 +3,9 @@ from data import hash_value, hash_evaluation
 from scipy.linalg import eigh
 from ksh import RBF
 import time
-import cPickle as cp
+from scipy.optimize import minimize
+from sklearn.svm import LinearSVC
+from sklearn.linear_model import LogisticRegression
 
 
 class DKSHv2(object):
@@ -22,8 +24,8 @@ class DKSHv2(object):
 		self.trainlabel = None
 
 		# tuning parameters
-		self.mu = 1e-5 * self.r * self.r
-		self.lmda = 1
+		self.mu = 1e-4
+		self.lmda = 1e-2
 
 	def train(self, traindata, trainlabel):
 		n = len(traindata)
@@ -52,13 +54,14 @@ class DKSHv2(object):
 		PH = np.zeros((n,l+self.r), dtype=np.float32)
 		PH[np.arange(n, dtype=np.int32), trainlabel] = 1
 		QH = np.copy(PH)
-		PH[:,:l-1] *= float(self.numlabel) / (self.numlabel-1) * self.r
-		PH[:,l-1] = 1.0 / (self.numlabel-1) * self.r
+		PH[:,:l-1] *= 2 * self.r
+		PH[:,l-1] = self.r
 		QH[:,l-1] = -1
 
 		# projection optimization
 		RM = np.dot(KK.T, KK)
 		W = np.zeros((self.m, self.r), dtype=np.float32) # parameter W
+		b = np.zeros(self.r) # parameter b
 		LM = np.dot(np.dot(KK.T, PH[:,:l]), np.dot(QH.T[:l], KK))
 
 		# Evaluator
@@ -67,6 +70,7 @@ class DKSHv2(object):
 		# step 1: initialize with spectral relaxation
 		# step 1.1: batch coordinate optimization
 		h0 = np.zeros(n)
+		h1 = np.zeros(n)
 		print '\nSTEP 1: Initialize with spectral relaxation...'
 		for rr in range(self.r):
 
@@ -84,9 +88,9 @@ class DKSHv2(object):
 		evaor(PH, QH, W, KK, mu, self.lmda, self.r, 1)
 
 		# step 1.2: batch coordinate optimization for some loops
-		for t in range(10):
+		for t in range(5):
 			for rr in range(self.r):
-				h0 = PH[:,l+rr]
+				h0[:] = PH[:,l+rr]
 				tmp = np.dot(KK.T, h0.reshape((n,1)))
 				LM += np.dot(tmp, tmp.T)
 
@@ -95,102 +99,87 @@ class DKSHv2(object):
 				tmp = np.dot(np.dot(W[:,rr].T, RM), W[:,rr])
 				W[:,rr] *= np.sqrt(n/tmp)
 
-				h0 = np.where(np.dot(KK, W[:,rr]) > 0, 1, -1)
+				h0[:] = np.where(np.dot(KK, W[:,rr]) > 0, 1, -1)
 
 				tmp = np.dot(KK.T, h0.reshape((n,1)))
 				LM -= np.dot(tmp, tmp.T)
 
 				PH[:,l+rr] = h0
 				QH[:,l+rr] = -1 * h0
-			evaor(PH, QH, W, KK, mu, self.lmda, self.r, 1)
-
-		# step 1.3: update PH and QH to get Hp and Hq
+		evaor(PH, QH, W, KK, mu, self.lmda, self.r, 1)
 
 		# step 2: discrete optimization
 		print '\nSTEP 2: Discrete Optimization...'
 		RM += self.lmda * np.eye(self.m)
-		invRM = np.linalg.inv(RM)
-		hp = np.zeros(n)
-		hq = np.zeros(n)
-		for t in range(10):
+		# For linear regression
+		# invRM = np.linalg.inv(RM)
+		# For SVM
+		cls = []
+		# for i in xrange(self.r):
+		#	cls.append(LinearSVC(C=1.0/self.lmda))
+		# For logistic regression
+		for i in xrange(self.r):
+			cls.append(LogisticRegression(C=1.0/self.lmda))
+		h = np.zeros(n)
+		bnds = [(-1,1) for i in xrange(n)]
+		for t in range(5):
 			print '\nIter No: %d' % t
 			# step 2.1: fix Hp, Hq, optimize W
-			W = -np.dot(invRM, np.dot(KK.T, QH[:,l:]))
+			# For linear regression
+			# W = -np.dot(invRM, np.dot(KK.T, QH[:,l:]))
+			# For SVM
+			# for rr in xrange(self.r):
+			#	cls[rr].fit(KK, PH[:,l+rr])
+			#	W[:,rr] = cls[rr].coef_[0]
+			#	b[rr] = cls[rr].intercept_[0]
+			# For logistic regression
+			for rr in xrange(self.r):
+				cls[rr].fit(KK, PH[:,l+rr])
+				W[:,rr] = cls[rr].coef_[0]
+				b[rr] = cls[rr].intercept_[0]
+
 			evaor(PH, QH, W, KK, mu, self.lmda, self.r, 2)
 
-			# step 2.2: fix Hp, W, optimize Hq
-			# step 2.3: fix Hq, W, optimize Hp
-			KK_W = mu * np.dot(KK, W)
+			# step 2.2: fix W, optimize H
+			KK_W = np.dot(KK, W) + b.reshape((1,self.r))
+			for rr in range(self.r):
+				h[:] = PH[:,l+rr]
+				QH[:,l+rr] = PH[:,l+rr] = 0
+				# For linear regression
+				# fun = lambda x: -np.dot(np.dot(x,PH), np.dot(x,QH)) - mu * np.dot(KK_W[:,rr], x)
+				# gra = lambda x: -2*np.dot(PH, np.dot(x, QH)) - mu * np.dot(KK_W[:,rr], x)
+				# For SVM
+				# fun = lambda x: -np.dot(np.dot(x,PH), np.dot(x,QH)) - mu / self.lmda * np.sum(np.where(x*KK_W[:,rr]>1, 0, 1-x*KK_W[:,rr]))
+				# gra = lambda x: -2*np.dot(PH, np.dot(x, QH)) - mu / self.lmda * np.where(KK_W[:,rr]>=0, np.where(x<1.0/KK_W[:,rr], KK_W[:,rr], 0), np.where(x>1.0/KK_W[:,rr], KK_W[:,rr], 0))
+				# For logistic regression
+				fun = lambda x: -np.dot(np.dot(x,PH), np.dot(x,QH)) - mu / self.lmda * np.log(1.0+np.exp(-x*KK_W[:,rr]))
+				gra = lambda x: -2*np.dot(PH, np.dot(x, QH)) - mu / self.lmda * (-KK_W[:,rr]) / (1.0+np.exp(x*KK_W[:,rr]))
+				res = minimize(fun, h, method='L-BFGS-B', jac=gra, bounds=bnds, options={'disp': False})
+				h[:] = np.where(res.x>=0, 1, -1)
+				PH[:,l+rr] = h
+				QH[:,l+rr] = -1 * h
 
-			for tt in range(5):
-				# initialize Hq
-				if tt == 0:
-					QH[:,l:] = 0
-					# H = np.where(KK_W>=0, 1, -1)
-					# QH[:,l:] = -1 * H
-					# PH[:,l:] = H
-
-				for rr in range(self.r):
-					hp[:] = PH[:,l+rr]
-					QH[:,l+rr] = PH[:,l+rr] = 0
-					hq = np.dot(QH, np.dot(PH.T, hp)) + KK_W[:,rr] # TODO: Optimize
-					hq = np.where(hq>=0, -1, 1)
-					PH[:,l+rr] = hp
-					QH[:,l+rr] = hq
-
-				# initialize Hp
-				if tt == 0:
-					PH[:,l:] = 0
-					# PH[:,l:] = H
-
-				for rr in range(self.r):
-					hq[:] = QH[:,l+rr]
-					QH[:,l+rr] = PH[:,l+rr] = 0
-					hp = np.dot(PH, np.dot(QH.T, hq)) # TODO: Optimize
-					hp = np.where(hp>=0, -1, 1)
-					PH[:,l+rr] = hp
-					QH[:,l+rr] = hq
 			evaor(PH, QH, W, KK, mu, self.lmda, self.r, 1)
 
 		self.W = W
+		self.b = b.reshape((1,self.r))
 		self.trainlabel = trainlabel
 		self.Hp = np.copy(PH[:,l:])
 		self.Hq = np.copy(-QH[:,l:])
 
 		QH[:,l:] = np.where(np.dot(KK, self.W)>=0, -1, 1)
-		print np.mean(np.sum(np.abs(self.Hq+QH[:,l:])/2, axis=1)), np.sum(np.abs(self.Hq+QH[:,l:])/2, axis=1)
+		PH[:,l:] = -QH[:,l:]
 		evaor(PH, QH, W, KK, mu, self.lmda, self.r, 1)
 
 	def queryhash(self, qdata):
 		Kdata = self.kernel(qdata, self.anchors)
 		Kdata -= self.mvec
-		Y = np.dot(Kdata, self.W)
+		Y = np.dot(Kdata, self.W) + self.b
 		Y = np.where(Y>=0, 1, 0)
 		return hash_value(Y)
 
-	def basehash(self, data, label=None):
-		nd = data.shape[0]
-		nb = self.trainlabel.shape[0]
-		# compute Hq first
-		Kdata = self.kernel(data, self.anchors)
-		Kdata -= self.mvec
-		Hq = np.dot(Kdata, self.W)
-		Hq = np.where(Hq>=0, 1, -1)
-
-		# compute Hp using out-of-sample method
-		if label != None: # If label given, use label for pairwise similarity
-			l = self.numlabel + 1
-			P = np.zeros((nd,l), dtype=np.float32)
-			P[np.arange(nd, dtype=np.int32), label] = 2
-			P[:,-1] = 1
-			Q = np.zeros((nb,l), dtype=np.float32)
-			Q[np.arange(nb, dtype=np.int32), self.trainlabel] = 1
-			Q[:,-1] = -1
-			Hp = np.dot(P, np.dot(Q.T, self.Hq)) + Hq
-		else: # If label unknown, use hamming distance for estimating similarity
-			Hp = np.dot(Hq, np.dot(self.Hp.T, self.Hq)) + Hq
-		Hp = np.where(Hp>=0, 1, 0)
-		return hash_value(Hp)
+	def basehash(self, data):
+		return self.queryhash(data)
 
 
 class ObjEvaluate(object):
@@ -214,7 +203,7 @@ class ObjEvaluate(object):
 
 
 def test():
-	np.random.seed(47)
+	np.random.seed(97)
 	X = np.load('data/cifar_gist.npy')
 	Y = np.load('data/cifar_label.npy')
 
@@ -234,16 +223,6 @@ def test():
 
 	H_test = dksh.queryhash(testdata)
 	H_base = dksh.queryhash(basedata)
-
-	np.save('baseasy.npy', dksh.Hp)
-	np.save('testasy.npy', dksh.Hq)
-	np.save('label.npy', dksh.trainlabel)
-
-	idx = np.argsort(dksh.trainlabel).squeeze()
-	bb = dksh.Hq[idx[0:5000:530]]
-	classham = (32-np.dot(bb,bb.T))/2
-	print np.sum(classham)
-	print classham
 
 	# make labels
 	gnd_truth = np.array([y == baselabel for y in testlabel]).astype(np.int8)

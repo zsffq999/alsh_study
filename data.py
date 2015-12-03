@@ -9,7 +9,7 @@ bit_num_in_uint8 = np.array([0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 1, 
 	4, 5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, 4, 5, 2, 3,\
 	3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6, \
 	4, 5, 5, 6, 5, 6, 6, 7, 2, 3, 3, 4, 3, 4, 4, 5, 3, 4, 4, 5, 4, 5, 5, 6, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, \
-	6, 7, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8])
+	6, 7, 3, 4, 4, 5, 4, 5, 5, 6, 4, 5, 5, 6, 5, 6, 6, 7, 4, 5, 5, 6, 5, 6, 6, 7, 5, 6, 6, 7, 6, 7, 7, 8], dtype=np.uint16)
 
 
 def hash_value(bitarray, unit=1):
@@ -25,7 +25,10 @@ def hash_value(bitarray, unit=1):
 def hamming_dist_mat(Y, X, unit=1):
 	# unit: number of bit containing a hash value. default 1
 	if unit == 1:
-		return np.sum(bit_num_in_uint8[[np.bitwise_xor(y, X) for y in Y]], axis=-1)
+		res = np.zeros((Y.shape[0], X.shape[0]), dtype=np.uint16)
+		for i in xrange(len(Y)):
+			res[i] = np.sum(bit_num_in_uint8[np.bitwise_xor(Y[i],X)], axis=-1)
+		return res
 	else:
 		return np.array([np.sum(y != X, axis=-1) for y in Y])
 
@@ -56,8 +59,6 @@ def hash_evaluation(Y, X, GndTruth, topMAP=5000, topN=10000, unit=1):
 	mAP = 0
 	for i in xrange(len(Y)):
 		rights = np.argwhere(GndTruth[i, ham_ranks[i]]==1)[:,0] + 1
-		if i % 100 == 0:
-			print rights[:10]
 		# print rights
 		rightcnt = np.searchsorted(rights, topMAP, 'r')
 		if rightcnt == 0:
@@ -86,16 +87,16 @@ def batch_eva_ensem(li_results):
 	return results
 
 
-def l2_dist_mat(X, Y):
+def sqdist(X, Y):
 	lenX = X.shape[0]
 	lenY = Y.shape[0]
 	X2 = np.dot(np.sum(X * X, axis=1).reshape((lenX, 1)), np.ones((1, lenY), dtype=np.float32))
 	Y2 = np.dot(np.ones((lenX, 1), dtype=np.float32), np.sum(Y * Y, axis=1).reshape((1, lenY)))
-	return np.sqrt(-2 * np.dot(X, Y.T) + X2 + Y2)
+	return np.clip(-2 * np.dot(X, Y.T) + X2 + Y2, 0, np.inf)
 
 
 def l2_gnd_truth(Y, X, topk):
-	distmat = l2_dist_mat(Y, X)
+	distmat = sqdist(Y, X)
 	ori_ranks = np.argsort(distmat, axis=1)[:,:topk]
 	labelmat = np.zeros((len(Y), len(X)), dtype=np.int8)
 	for i in xrange(len(Y)):
