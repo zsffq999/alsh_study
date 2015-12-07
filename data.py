@@ -33,8 +33,9 @@ def hamming_dist_mat(Y, X, unit=1):
 		return np.array([np.sum(y != X, axis=-1) for y in Y])
 
 
-def hash_evaluation(Y, X, GndTruth, topMAP=5000, topN=10000, unit=1):
+def hash_evaluation(Y, X, GndTruth, topMAP=5000, topN=10000, unit=1, trn_time=0):
 	results = {}
+	results['trn_time'] = trn_time
 	total = np.sum(GndTruth, dtype=np.int64)
 	results['total'] = total
 	results['leny'] = len(Y)
@@ -50,6 +51,14 @@ def hash_evaluation(Y, X, GndTruth, topMAP=5000, topN=10000, unit=1):
 	# recall at top N
 	rank_rec = np.sum([np.cumsum(GndTruth[i, ham_ranks[i,:topN]]) for i in xrange(len(Y))], axis=0)
 	results['rec'] = rank_rec/float(total)
+
+	# precision@hamming_dist<=2
+	pre_2 = 0.0
+	for i in xrange(len(Y)):
+		pos = np.searchsorted(h_mat[i, ham_ranks[i]], 2, side='right')
+		if pos > 0:
+			pre_2 += np.sum(GndTruth[i,ham_ranks[i,:pos]]) / float(pos)
+	results['pre2'] = pre_2 / len(Y)
 
 	# precision-recall
 	pr = np.array([rank_rec/float(total), rank_rec/(np.arange(topN)+1.0)/len(Y)])
@@ -71,16 +80,40 @@ def hash_evaluation(Y, X, GndTruth, topMAP=5000, topN=10000, unit=1):
 
 def batch_eva_ensem(li_results):
 	results = {}
-
-	results['time'] = sum([r['time'] for r in li_results])
-	results['leny'] = sum(r['leny'] for y in li_results)
-
 	totals = np.array([r['total'] for r in li_results])
 	results['total'] = np.sum(totals, dtype=np.int64)
 
-	results['map'] = np.sum(np.array([r['map']*r['total'] for r in li_results])) / results['total']
+	results['time'] = sum([r['time'] for r in li_results])
+	results['trn_time'] = sum([r['trn_time'] for r in li_results])
+	results['leny'] = sum([r['leny'] for r in li_results])
 
-	rank_rec = np.sum(np.array([r['rec']*r['total']] for r in li_results), axis=0)
+	results['map'] = np.sum(np.array([r['map']*r['total'] for r in li_results])) / results['total']
+	results['pre2'] = np.sum(np.array([r['pre2']*r['total'] for r in li_results])) / results['total']
+
+	rank_rec = np.sum(np.array([r['rec']*r['total'] for r in li_results]), axis=0)
+	results['rec'] = rank_rec / results['total']
+	results['pr'] = rank_rec / (np.arange(len(rank_rec))+1.0) / results['leny']
+
+	return results
+
+
+def multi_evaluation(li_results):
+	results = {}
+	totals = np.array([r['total'] for r in li_results])
+	results['total'] = np.sum(totals, dtype=np.int64)
+
+	results['time'] = sum([r['time'] for r in li_results]) / results['total']
+	results['trn_time'] = sum([r['trn_time'] for r in li_results]) / results['total']
+	results['leny'] = sum([r['leny'] for r in li_results])
+
+	maps = np.array([r['map'] for r in li_results])
+	pre2 = np.array([r['pre2'] for r in li_results])
+	results['map_mean'] = np.mean(maps)
+	results['map_std'] = np.std(maps, ddof=1)
+	results['pre2_mean'] = np.mean(pre2)
+	results['pre2_std'] = np.std(pre2, ddof=1)
+
+	rank_rec = np.sum(np.array([r['rec'] for r in li_results]), axis=0)
 	results['rec'] = rank_rec / results['total']
 	results['pr'] = rank_rec / (np.arange(len(rank_rec))+1.0) / results['leny']
 
