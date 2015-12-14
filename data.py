@@ -33,7 +33,7 @@ def hamming_dist_mat(Y, X, unit=1):
 		return np.array([np.sum(y != X, axis=-1) for y in Y])
 
 
-def hash_evaluation(Y, X, GndTruth, topMAP=5000, topN=10000, unit=1, trn_time=0):
+def hash_evaluation(Y, X, GndTruth, topMAP=5000, topN=5000, unit=1, trn_time=0):
 	results = {}
 	results['trn_time'] = trn_time
 	total = np.sum(GndTruth, dtype=np.int64)
@@ -61,7 +61,7 @@ def hash_evaluation(Y, X, GndTruth, topMAP=5000, topN=10000, unit=1, trn_time=0)
 	results['pre2'] = pre_2 / len(Y)
 
 	# precision-recall
-	pr = np.array([rank_rec/float(total), rank_rec/(np.arange(topN)+1.0)/len(Y)])
+	pr = rank_rec/(np.arange(topN)+1.0)/len(Y)
 	results['pr'] = pr
 
 	# mAP
@@ -101,19 +101,23 @@ def multi_evaluation(li_results):
 	results = {}
 	totals = np.array([r['total'] for r in li_results])
 	results['total'] = np.sum(totals, dtype=np.int64)
-
-	results['time'] = sum([r['time'] for r in li_results]) / results['total']
-	results['trn_time'] = sum([r['trn_time'] for r in li_results]) / results['total']
 	results['leny'] = sum([r['leny'] for r in li_results])
+
+	results['time'] = sum([r['time'] for r in li_results]) / results['leny']
+	results['trn_time'] = sum([r['trn_time'] for r in li_results]) / len(li_results)
 
 	maps = np.array([r['map'] for r in li_results])
 	pre2 = np.array([r['pre2'] for r in li_results])
 	results['map_mean'] = np.mean(maps)
-	results['map_std'] = np.std(maps, ddof=1)
 	results['pre2_mean'] = np.mean(pre2)
-	results['pre2_std'] = np.std(pre2, ddof=1)
+	if len(li_results) >= 2:
+		results['map_std'] = np.std(maps, ddof=1)
+		results['pre2_std'] = np.std(pre2, ddof=1)
+	else:
+		results['map_std'] = 0
+		results['pre2_std'] = 0
 
-	rank_rec = np.sum(np.array([r['rec'] for r in li_results]), axis=0)
+	rank_rec = np.sum(np.array([r['rec']*r['total'] for r in li_results]), axis=0)
 	results['rec'] = rank_rec / results['total']
 	results['pr'] = rank_rec / (np.arange(len(rank_rec))+1.0) / results['leny']
 

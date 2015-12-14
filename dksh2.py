@@ -112,31 +112,31 @@ class DKSHv2(object):
 		print '\nSTEP 2: Discrete Optimization...'
 		RM += self.lmda * np.eye(self.m)
 		# For linear regression
-		# invRM = np.linalg.inv(RM)
+		invRM = np.linalg.inv(RM)
 		# For SVM
 		cls = []
 		# for i in xrange(self.r):
 		#	cls.append(LinearSVC(C=1.0/self.lmda))
 		# For logistic regression
-		for i in xrange(self.r):
-			cls.append(LogisticRegression(C=1.0/self.lmda))
+		#for i in xrange(self.r):
+		#	cls.append(LogisticRegression(C=1.0/self.lmda))
 		h = np.zeros(n)
 		bnds = [(-1,1) for i in xrange(n)]
 		for t in range(5):
 			print '\nIter No: %d' % t
 			# step 2.1: fix Hp, Hq, optimize W
 			# For linear regression
-			# W = -np.dot(invRM, np.dot(KK.T, QH[:,l:]))
+			W = -np.dot(invRM, np.dot(KK.T, QH[:,l:]))
 			# For SVM
-			# for rr in xrange(self.r):
+			#for rr in xrange(self.r):
 			#	cls[rr].fit(KK, PH[:,l+rr])
 			#	W[:,rr] = cls[rr].coef_[0]
 			#	b[rr] = cls[rr].intercept_[0]
 			# For logistic regression
-			for rr in xrange(self.r):
-				cls[rr].fit(KK, PH[:,l+rr])
-				W[:,rr] = cls[rr].coef_[0]
-				b[rr] = cls[rr].intercept_[0]
+			#for rr in xrange(self.r):
+			#	cls[rr].fit(KK, PH[:,l+rr])
+			#	W[:,rr] = cls[rr].coef_[0]
+			#	b[rr] = cls[rr].intercept_[0]
 
 			evaor(PH, QH, W, KK, mu, self.lmda, self.r, 2)
 
@@ -146,14 +146,14 @@ class DKSHv2(object):
 				h[:] = PH[:,l+rr]
 				QH[:,l+rr] = PH[:,l+rr] = 0
 				# For linear regression
-				# fun = lambda x: -np.dot(np.dot(x,PH), np.dot(x,QH)) - mu * np.dot(KK_W[:,rr], x)
-				# gra = lambda x: -2*np.dot(PH, np.dot(x, QH)) - mu * np.dot(KK_W[:,rr], x)
+				fun = lambda x: -np.dot(np.dot(x,PH), np.dot(x,QH)) - mu * np.dot(KK_W[:,rr], x)
+				gra = lambda x: -2*np.dot(PH, np.dot(x, QH)) - mu * np.dot(KK_W[:,rr], x)
 				# For SVM
 				# fun = lambda x: -np.dot(np.dot(x,PH), np.dot(x,QH)) - mu / self.lmda * np.sum(np.where(x*KK_W[:,rr]>1, 0, 1-x*KK_W[:,rr]))
 				# gra = lambda x: -2*np.dot(PH, np.dot(x, QH)) - mu / self.lmda * np.where(KK_W[:,rr]>=0, np.where(x<1.0/KK_W[:,rr], KK_W[:,rr], 0), np.where(x>1.0/KK_W[:,rr], KK_W[:,rr], 0))
 				# For logistic regression
-				fun = lambda x: -np.dot(np.dot(x,PH), np.dot(x,QH)) - mu / self.lmda * np.log(1.0+np.exp(-x*KK_W[:,rr]))
-				gra = lambda x: -2*np.dot(PH, np.dot(x, QH)) - mu / self.lmda * (-KK_W[:,rr]) / (1.0+np.exp(x*KK_W[:,rr]))
+				#fun = lambda x: -np.dot(np.dot(x,PH), np.dot(x,QH)) - mu / self.lmda * np.log(1.0+np.exp(-x*KK_W[:,rr]))
+				#gra = lambda x: -2*np.dot(PH, np.dot(x, QH)) - mu / self.lmda * (-KK_W[:,rr]) / (1.0+np.exp(x*KK_W[:,rr]))
 				res = minimize(fun, h, method='L-BFGS-B', jac=gra, bounds=bnds, options={'disp': False})
 				h[:] = np.where(res.x>=0, 1, -1)
 				PH[:,l+rr] = h

@@ -95,10 +95,6 @@ class SDH(object):
 
 		self.B = B
 		self.P = P
-		H1 = np.where(B>0, 1, 0)
-		H2 = np.where(np.dot(KK,P)>0, 1, 0)
-		diff = np.sum(np.abs(H1-H2), axis=1)
-		print np.mean(diff)
 
 	def queryhash(self, qdata):
 		Kdata = self.kernel(qdata, self.anchors)

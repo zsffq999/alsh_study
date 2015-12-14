@@ -3,6 +3,9 @@ from data import hash_evaluation, multi_evaluation
 import cPickle as cp
 import time
 from sdh import SDH
+from dksh import DKSHv2
+from ksh import KSH
+from loader import Cifar10Loader, Cifar100Loader
 
 
 def dump(filename, obj):
@@ -16,35 +19,38 @@ def load(filename):
 
 
 def eva_checkpoint(algo_name, nbit, li_results):
-	dump('results/{}_{}_step'.format(algo_name, nbit), li_results)
+	dump('results_100/{}_{}_step'.format(algo_name, nbit), li_results)
 	res = multi_evaluation(li_results)
-	dump('results/{}_{}_total'.format(algo_name, nbit), res)
+	dump('results_100/{}_{}_total'.format(algo_name, nbit), res)
 	if len(li_results) >= 1:
 		print 'mean: mAP={}, pre2={}'.format(res['map_mean'], res['pre2_mean'])
 	if len(li_results) >= 2:
 		print 'std: mAP={}, pre2={}'.format(res['map_std'], res['pre2_std'])
 
 
-def test(list_algo, list_algo_name, list_bits, X, Y):
+def hash_factory(algo_name, nbits, nlabels, nanchors):
+	if algo_name == 'SDH':
+		return SDH(nbits, nanchors, nlabels, RBF)
+	if algo_name == 'DKSH':
+		return DKSHv2(nbits, nanchors, nlabels, RBF)
+	if algo_name == 'KSH':
+		return KSH(nbits, nanchors, nlabels, RBF)
+	return None
+
+
+def test(list_algo_name, list_bits, loader):
 	seeds = [7, 17, 37, 47, 67, 97, 107, 127, 137, 157]
-	for (i, alg) in enumerate(list_algo):
-		algo_name = list_algo_name[i]
+	for algo_name in list_algo_name:
 		for nbit in list_bits:
 			print '======execute {} at bit {}======'.format(algo_name, nbit)
 			print '====total process round: {}====='.format(len(seeds))
 			li_results = []
 			for sd in seeds:
 				print '\nround #{}...'.format(len(li_results)+1)
-				np.random.seed(sd)
-				idx = np.arange(len(X), dtype=np.int32)
-				np.random.shuffle(idx)
 
-				traindata = X[idx[:5000]]
-				trainlabel = Y[idx[:5000]]
-				basedata = X[idx[:59000]]
-				baselabel = Y[idx[:59000]]
-				testdata = X[idx[59000:]]
-				testlabel = Y[idx[59000:]]
+				traindata, trainlabel, basedata, baselabel, testdata, testlabel = loader.split(sd)
+
+				alg = hash_factory(algo_name, nbit, 100, 1000)
 
 				tic = time.clock()
 				alg.train(traindata, trainlabel)
@@ -59,10 +65,10 @@ def test(list_algo, list_algo_name, list_bits, X, Y):
 
 				print 'testing...'
 
-				res = hash_evaluation(H_test, H_base, gnd_truth, 59000, trn_time=toc-tic)
+				res = hash_evaluation(H_test, H_base, gnd_truth, 50000, topN=50000, trn_time=toc-tic)
 
 				li_results.append(res)
-				eva_checkpoint(li_results)
+				eva_checkpoint(algo_name, nbit, li_results)
 
 
 def RBF(X, Y):
@@ -77,13 +83,11 @@ if __name__ == "__main__":
 	# init random seed
 
 	# load data
-	X = np.load('data/cifar_gist.npy')
-	Y = np.load('data/cifar_label.npy')
+	loader = Cifar100Loader()
 
 	# load algorithms
-	list_algo = [SDH(32, 1000, 10, RBF)]
-	list_algo_name = 'SDH'
-	list_nbits = [32]
+	list_algo_name = ['SDH']
+	list_nbits = [16, 32, 48, 64, 96]
 
 	# test
-	test(list_algo, list_algo_name, list_nbits, X, Y)
+	test(list_algo_name, list_nbits, loader)
