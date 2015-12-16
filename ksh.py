@@ -2,7 +2,6 @@ import numpy as np
 from data import hash_value, hash_evaluation
 from scipy.linalg import eigh
 import time
-import ksh2
 
 
 def OptProjectionFast(K, PH, QH, a0, cn):
@@ -101,7 +100,11 @@ class KSH(object):
 
 		# PH = [P, +H], QH = [Q, -H]
 		PH = np.zeros((n,l+self.r), dtype=np.float32)
-		PH[np.arange(n, dtype=np.int32), trainlabel] = 1
+		if len(trainlabel.shape) >= 2:
+			assert trainlabel.shape[1] == self.numlabel
+			PH[:,:self.numlabel] = trainlabel
+		else:
+			PH[np.arange(n, dtype=np.int32), trainlabel] = 1
 		QH = np.copy(PH)
 		PH[:,:l-1] *= 2*self.r
 		PH[:,l-1] = self.r
@@ -165,28 +168,6 @@ class KSH(object):
 
 	def basehash(self, data):
 		return self.queryhash(data)
-
-
-def test_matrix_fac():
-	labels = (np.random.rand(100) * 10).astype(np.int32)
-	P = np.zeros((100, 11))
-	P[np.arange(100, dtype=np.int32), labels] = 1
-	Q = np.copy(P)
-	P *= 2
-	P[:,-1] = 1
-	Q[:,-1] = -1
-	S = -np.ones((100, 100))
-	for i in xrange(100):
-		for j in xrange(100):
-			if labels[i] == labels[j]:
-				S[i,j] = 1
-
-	print labels
-	print P[:10]
-	print Q[:10]
-	print np.linalg.norm(S-np.dot(P, Q.T))
-
-# test_matrix_fac()
 
 
 def RBF(X, Y):

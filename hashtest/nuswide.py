@@ -1,6 +1,7 @@
 import numpy as np
 import os
 
+
 # save BoW
 def dat2npy(src, dst):
 	npybow = []

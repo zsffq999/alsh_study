@@ -42,6 +42,13 @@ class SDH(object):
 
 		# kernel matrix and mean
 		KK = self.kernel(traindata, self.anchors)
+
+		print KK
+		print np.mean(KK)
+		print np.median(KK)
+		print np.max(KK)
+		np.save('tmp.npy', KK)
+
 		self.mvec = np.mean(KK, axis=0).reshape((1, self.m))
 		KK = KK - self.mvec
 
@@ -49,7 +56,11 @@ class SDH(object):
 		B = np.where(B>0.5, 1, -1).astype(np.float32)
 
 		Y = np.zeros((n,self.numlabel), dtype=np.float32)
-		Y[np.arange(n, dtype=np.int32), trainlabel] = 1
+		if len(trainlabel.shape) >= 2:
+			assert trainlabel.shape[1] == self.numlabel
+			Y[:,:self.numlabel] = trainlabel
+		else:
+			Y[np.arange(n, dtype=np.int32), trainlabel] = 1
 
 		for tt in range(10):
 			print 'iter:', tt
