@@ -3,10 +3,10 @@ from data import hash_value, hash_evaluation
 from scipy.linalg import eigh
 from ksh import RBF
 import time
-import cPickle as cp
+from scipy.optimize import minimize
 
 
-class DKSH(object):
+class DKSHv2(object):
 	def __init__(self, r, m, numlabel, kernel):
 		self.r = r # num of hash bits
 		self.m = m # num of anchors
@@ -22,8 +22,8 @@ class DKSH(object):
 		self.trainlabel = None
 
 		# tuning parameters
-		self.mu = 1e-5 * self.r * self.r
-		self.lmda = 1
+		self.mu = 1e-4
+		self.lmda = 0
 
 	def train(self, traindata, trainlabel):
 		n = len(traindata)
@@ -50,10 +50,14 @@ class DKSH(object):
 
 		# PH = [P, +Hp], QH = [Q, -Hq]
 		PH = np.zeros((n,l+self.r), dtype=np.float32)
-		PH[np.arange(n, dtype=np.int32), trainlabel] = 1
+		if len(trainlabel.shape) >= 2:
+			assert trainlabel.shape[1] == self.numlabel
+			PH[:,:self.numlabel] = trainlabel
+		else:
+			PH[np.arange(n, dtype=np.int32), trainlabel] = 1
 		QH = np.copy(PH)
-		PH[:,:l-1] *= float(self.numlabel) / (self.numlabel-1) * self.r
-		PH[:,l-1] = 1.0 / (self.numlabel-1) * self.r
+		PH[:,:l-1] *= 2 * self.r
+		PH[:,l-1] = self.r
 		QH[:,l-1] = -1
 
 		# projection optimization
@@ -62,11 +66,12 @@ class DKSH(object):
 		LM = np.dot(np.dot(KK.T, PH[:,:l]), np.dot(QH.T[:l], KK))
 
 		# Evaluator
-		evaor = ObjEvaluate(1)
+		evaor = ObjEvaluate(0)
 
 		# step 1: initialize with spectral relaxation
 		# step 1.1: batch coordinate optimization
 		h0 = np.zeros(n)
+		h1 = np.zeros(n)
 		print '\nSTEP 1: Initialize with spectral relaxation...'
 		for rr in range(self.r):
 
@@ -86,7 +91,7 @@ class DKSH(object):
 		# step 1.2: batch coordinate optimization for some loops
 		for t in range(5):
 			for rr in range(self.r):
-				h0 = PH[:,l+rr]
+				h0[:] = PH[:,l+rr]
 				tmp = np.dot(KK.T, h0.reshape((n,1)))
 				LM += np.dot(tmp, tmp.T)
 
@@ -95,48 +100,43 @@ class DKSH(object):
 				tmp = np.dot(np.dot(W[:,rr].T, RM), W[:,rr])
 				W[:,rr] *= np.sqrt(n/tmp)
 
-				h0 = np.where(np.dot(KK, W[:,rr]) > 0, 1, -1)
+				h0[:] = np.where(np.dot(KK, W[:,rr]) > 0, 1, -1)
 
 				tmp = np.dot(KK.T, h0.reshape((n,1)))
 				LM -= np.dot(tmp, tmp.T)
 
 				PH[:,l+rr] = h0
 				QH[:,l+rr] = -1 * h0
-			evaor(PH, QH, W, KK, mu, self.lmda, self.r, 1)
-
-		# step 1.3: update PH and QH to get Hp and Hq
+		evaor(PH, QH, W, KK, mu, self.lmda, self.r, 1)
+		# TSP
+		# PH[:,l:] = np.where(np.random.rand(n,self.r)>0.5,1,-1)
+		# QH[:,l:] = -PH[:,l:]
+		# evaor(PH, QH, W, KK, mu, self.lmda, self.r, 1)
 
 		# step 2: discrete optimization
 		print '\nSTEP 2: Discrete Optimization...'
 		RM += self.lmda * np.eye(self.m)
 		invRM = np.linalg.inv(RM)
-		hp = np.zeros(n)
-		hq = np.zeros(n)
-		for t in range(10):
+		h = np.zeros(n)
+		bnds = [(-1,1) for i in xrange(n)]
+		for t in range(5):
 			print '\nIter No: %d' % t
 			# step 2.1: fix Hp, Hq, optimize W
 			W = -np.dot(invRM, np.dot(KK.T, QH[:,l:]))
 			evaor(PH, QH, W, KK, mu, self.lmda, self.r, 2)
 
-			# step 2.2: fix Hp, W, optimize Hq
-			# step 2.3: fix Hq, W, optimize Hp
-			KK_W = mu * np.dot(KK, W)
-			for tt in range(5):
-				for rr in range(self.r):
-					hp[:] = PH[:,l+rr]
-					QH[:,l+rr] = PH[:,l+rr] = 0
-					hq = np.dot(QH, np.dot(PH.T, hp)) + KK_W[:,rr] # TODO: Optimize
-					hq = np.where(hq>=0, -1, 1)
-					PH[:,l+rr] = hp
-					QH[:,l+rr] = hq
+			# step 2.2: fix W, optimize H
+			KK_W = np.dot(KK, W)
+			for rr in range(self.r):
+				h[:] = PH[:,l+rr]
+				QH[:,l+rr] = PH[:,l+rr] = 0
+				fun = lambda x: -np.dot(np.dot(x,PH), np.dot(x,QH)) - mu * np.dot(KK_W[:,rr], x)
+				gra = lambda x: -2*np.dot(PH, np.dot(x, QH)) - mu * np.dot(KK_W[:,rr], x)
+				res = minimize(fun, h, method='L-BFGS-B', jac=gra, bounds=bnds, options={'disp': False})
+				h[:] = np.where(res.x>=0, 1, -1)
+				PH[:,l+rr] = h
+				QH[:,l+rr] = -1 * h
 
-				for rr in range(self.r):
-					hq[:] = QH[:,l+rr]
-					QH[:,l+rr] = PH[:,l+rr] = 0
-					hp = np.dot(PH, np.dot(QH.T, hq)) # TODO: Optimize
-					hp = np.where(hp>=0, -1, 1)
-					PH[:,l+rr] = hp
-					QH[:,l+rr] = hq
 			evaor(PH, QH, W, KK, mu, self.lmda, self.r, 1)
 
 		self.W = W
@@ -145,7 +145,7 @@ class DKSH(object):
 		self.Hq = np.copy(-QH[:,l:])
 
 		QH[:,l:] = np.where(np.dot(KK, self.W)>=0, -1, 1)
-		print np.mean(np.sum(np.abs(self.Hq+QH[:,l:])/2, axis=1)), np.sum(np.abs(self.Hq+QH[:,l:])/2, axis=1)
+		PH[:,l:] = -QH[:,l:]
 		evaor(PH, QH, W, KK, mu, self.lmda, self.r, 1)
 
 	def queryhash(self, qdata):
@@ -155,29 +155,8 @@ class DKSH(object):
 		Y = np.where(Y>=0, 1, 0)
 		return hash_value(Y)
 
-	def basehash(self, data, label=None):
-		nd = data.shape[0]
-		nb = self.trainlabel.shape[0]
-		# compute Hq first
-		Kdata = self.kernel(data, self.anchors)
-		Kdata -= self.mvec
-		Hq = np.dot(Kdata, self.W)
-		Hq = np.where(Hq>=0, 1, -1)
-
-		# compute Hp using out-of-sample method
-		if label != None: # If label given, use label for pairwise similarity
-			l = self.numlabel + 1
-			P = np.zeros((nd,l), dtype=np.float32)
-			P[np.arange(nd, dtype=np.int32), label] = 2
-			P[:,-1] = 1
-			Q = np.zeros((nb,l), dtype=np.float32)
-			Q[np.arange(nb, dtype=np.int32), self.trainlabel] = 1
-			Q[:,-1] = -1
-			Hp = np.dot(P, np.dot(Q.T, self.Hq)) + Hq
-		else: # If label unknown, use hamming distance for estimating similarity
-			Hp = np.dot(Hq, np.dot(self.Hp.T, self.Hq)) + Hq
-		Hp = np.where(Hp>=0, 1, 0)
-		return hash_value(Hp)
+	def basehash(self, data):
+		return self.queryhash(data)
 
 
 class ObjEvaluate(object):
@@ -205,15 +184,15 @@ def test():
 	X = np.load('data/cifar_gist.npy')
 	Y = np.load('data/cifar_label.npy')
 
-	traindata = X[:5000]
-	trainlabel = Y[:5000]
+	traindata = X[:59000]
+	trainlabel = Y[:59000]
 	basedata = X[:59000]
 	baselabel = Y[:59000]
 	testdata = X[59000:]
 	testlabel = Y[59000:]
 
 	# train model
-	dksh = DKSH(32, 300, 10, RBF)
+	dksh = DKSHv2(32, 1000, 10, RBF)
 	tic = time.clock()
 	dksh.train(traindata, trainlabel)
 	toc = time.clock()
@@ -221,16 +200,6 @@ def test():
 
 	H_test = dksh.queryhash(testdata)
 	H_base = dksh.queryhash(basedata)
-
-	np.save('baseasy.npy', dksh.Hp)
-	np.save('testasy.npy', dksh.Hq)
-	np.save('label.npy', dksh.trainlabel)
-
-	idx = np.argsort(dksh.trainlabel).squeeze()
-	bb = dksh.Hq[idx[0:5000:530]]
-	classham = (32-np.dot(bb,bb.T))/2
-	print np.sum(classham)
-	print classham
 
 	# make labels
 	gnd_truth = np.array([y == baselabel for y in testlabel]).astype(np.int8)

@@ -25,7 +25,7 @@ class DKSHv2(object):
 
 		# tuning parameters
 		self.mu = 1e-4
-		self.lmda = 0
+		self.lmda = 1e-2
 
 	def train(self, traindata, trainlabel):
 		n = len(traindata)
@@ -52,11 +52,7 @@ class DKSHv2(object):
 
 		# PH = [P, +Hp], QH = [Q, -Hq]
 		PH = np.zeros((n,l+self.r), dtype=np.float32)
-		if len(trainlabel.shape >= 2):
-			assert trainlabel.shape[1] == self.numlabel
-			PH[:,:self.numlabel] = trainlabel
-		else:
-			PH[np.arange(n, dtype=np.int32), trainlabel] = 1
+		PH[np.arange(n, dtype=np.int32), trainlabel] = 1
 		QH = np.copy(PH)
 		PH[:,:l-1] *= 2 * self.r
 		PH[:,l-1] = self.r
@@ -69,7 +65,7 @@ class DKSHv2(object):
 		LM = np.dot(np.dot(KK.T, PH[:,:l]), np.dot(QH.T[:l], KK))
 
 		# Evaluator
-		evaor = ObjEvaluate(0)
+		evaor = ObjEvaluate(1)
 
 		# step 1: initialize with spectral relaxation
 		# step 1.1: batch coordinate optimization

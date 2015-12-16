@@ -90,3 +90,4 @@ class NuswideLoader(Loader):
 		test_sample = np.array(test_sample, dtype=np.int32)
 		base_sample = np.setdiff1d(idx, test_sample)
 		return self.data[train_sample], self.label[train_sample], self.data[base_sample], self.label[base_sample], self.data[test_sample], self.label[test_sample]
+
