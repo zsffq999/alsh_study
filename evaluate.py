@@ -80,15 +80,3 @@ def RBF(X, Y):
 	return np.exp((2*np.dot(X,Y.T) - X2 - Y2)/1600)
 
 
-if __name__ == "__main__":
-	# init random seed
-
-	# load data
-	loader = NuswideLoader()
-
-	# load algorithms
-	list_algo_name = ['SDH', 'DKSH', 'KSH']
-	list_nbits = [32]
-
-	# test
-	test(list_algo_name, list_nbits, loader)
