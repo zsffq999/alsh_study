@@ -56,6 +56,7 @@ class Cifar100Loader(Loader):
 class NuswideLoader(Loader):
 	def __init__(self):
 		self.data = np.vstack((np.load('data/nuswide/bow_train.npy'), np.load('data/nuswide/bow_test.npy')))
+		self.data /= np.linalg.norm(self.data, axis=1).reshape((1,self.data.shape[1]))
 		self.label = np.vstack((np.load('data/nuswide/label_train.npy'), np.load('data/nuswide/label_test.npy')))
 
 

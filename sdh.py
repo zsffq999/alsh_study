@@ -43,12 +43,6 @@ class SDH(object):
 		# kernel matrix and mean
 		KK = self.kernel(traindata, self.anchors)
 
-		print KK
-		print np.mean(KK)
-		print np.median(KK)
-		print np.max(KK)
-		np.save('tmp.npy', KK)
-
 		self.mvec = np.mean(KK, axis=0).reshape((1, self.m))
 		KK = KK - self.mvec
 
@@ -130,7 +124,6 @@ def test():
 	baselabel = Y[:59000]
 	testdata = X[59000:]
 	testlabel = Y[59000:]
-
 
 	# train model
 	sdh = SDH(32, 300, 10, RBF)
