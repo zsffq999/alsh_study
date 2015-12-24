@@ -5,6 +5,7 @@ import time
 from sdh import SDH
 from dksh import DKSHv2
 from ksh import KSH
+from lsh import LSH
 from loader import Cifar10Loader, Cifar100Loader, NuswideLoader
 
 
@@ -35,6 +36,8 @@ def hash_factory(algo_name, nbits, nlabels, nanchors):
 		return DKSHv2(nbits, nanchors, nlabels, RBF)
 	if algo_name == 'KSH':
 		return KSH(nbits, nanchors, nlabels, RBF)
+	if algo_name == 'LSH':
+		return LSH(nbits)
 	return None
 
 
@@ -50,7 +53,7 @@ def test(list_algo_name, list_bits, loader):
 
 				traindata, trainlabel, basedata, baselabel, testdata, testlabel = loader.split(sd)
 
-				alg = hash_factory(algo_name, nbit, 21, 1000)
+				alg = hash_factory(algo_name, nbit, 21, 300)
 
 				tic = time.clock()
 				alg.train(traindata, trainlabel)
@@ -66,7 +69,7 @@ def test(list_algo_name, list_bits, loader):
 
 				print 'testing...'
 
-				res = hash_evaluation(H_test, H_base, gnd_truth, 5000, topN=5000, trn_time=toc-tic)
+				res = hash_evaluation(H_test, H_base, gnd_truth, len(baselabel), len(baselabel), trn_time=toc-tic)
 
 				li_results.append(res)
 				eva_checkpoint(algo_name, nbit, li_results)
@@ -77,6 +80,18 @@ def RBF(X, Y):
 	lenY = Y.shape[0]
 	X2 = np.dot(np.sum(X * X, axis=1).reshape((lenX, 1)), np.ones((1, lenY), dtype=np.float32))
 	Y2 = np.dot(np.ones((lenX, 1), dtype=np.float32), np.sum(Y * Y, axis=1).reshape((1, lenY)))
-	return np.exp((2*np.dot(X,Y.T) - X2 - Y2)/1600)
+	return np.exp((2*np.dot(X,Y.T) - X2 - Y2)/0.4)
 
 
+if __name__ == "__main__":
+	# init random seed
+
+	# load data
+	loader = NuswideLoader()
+
+	# load algorithms
+	list_algo_name = ['LSH']
+	list_nbits = [32, 64]
+
+	# test
+	test(list_algo_name, list_nbits, loader)

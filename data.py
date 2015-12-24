@@ -84,7 +84,7 @@ def batch_eva_ensem(li_results):
 	results['total'] = np.sum(totals, dtype=np.int64)
 
 	results['time'] = sum([r['time'] for r in li_results])
-	results['trn_time'] = sum([r['trn_time'] for r in li_results])
+	results['trn_time'] = sum([r['trn_time'] for r in li_results]) / len(li_results)
 	results['leny'] = sum([r['leny'] for r in li_results])
 
 	results['map'] = np.sum(np.array([r['map']*r['total'] for r in li_results])) / results['total']
