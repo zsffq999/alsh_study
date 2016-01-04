@@ -118,8 +118,6 @@ class Sparse_KSH(object):
 		RM = np.dot(KK.T, KK)
 		A = np.zeros((self.m, self.r), dtype=np.float32) # parameter W
 		LM = self.r*(2*np.dot(P.dot(KK).T, P.dot(KK)) - np.dot(np.sum(KK.T, axis=1, keepdims=True), np.sum(KK, axis=0, keepdims=True)))
-		print LM, np.sum(LM)
-		print RM, np.sum(RM)
 
 		# greedy optimization
 		for rr in range(0, self.r):

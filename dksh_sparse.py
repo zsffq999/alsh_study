@@ -82,6 +82,7 @@ class Sparse_DKSH(object):
 		evaor(P, H, W, KK, mu, self.lmda, self.r, 1)
 
 		# step 1.2: batch coordinate optimization for some loops
+		h1 = np.zeros(n)
 		for t in range(5):
 			print 'step 1.{}...'.format(t+2)
 			for rr in range(self.r):
@@ -94,15 +95,19 @@ class Sparse_DKSH(object):
 				tmp = np.dot(np.dot(W[:,rr].T, RM), W[:,rr])
 				W[:,rr] *= np.sqrt(n/tmp)
 
-				h0[:] = np.where(np.dot(KK, W[:,rr]) > 0, 1, -1)
+				# JUST FOR EXPERIMENT
+				h1[:] = np.where(np.dot(KK, W[:,rr]) > 0, 1, -1)
+				H[:,rr] = 0
+				fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,H)**2)
+				if fun(h1) <= fun(h0):
+					h0[:] = h1[:]
+				# END FOR EXPERIMENT
 
 				tmp = np.dot(KK.T, h0.reshape((n,1)))
 				LM -= np.dot(tmp, tmp.T)
 
 				H[:,rr] = h0
 
-				# PH[:,l+rr] = h0
-				# QH[:,l+rr] = -1 * h0
 		evaor(P, H, W, KK, mu, self.lmda, self.r, 1)
 		# TSP
 		# PH[:,l:] = np.where(np.random.rand(n,self.r)>0.5,1,-1)
@@ -114,12 +119,12 @@ class Sparse_DKSH(object):
 		RM += self.lmda * np.eye(self.m)
 		invRM = np.linalg.inv(RM)
 		h = np.zeros(n)
+		h1 = np.zeros(n)
 		bnds = [(-1,1) for i in xrange(n)]
 		for t in range(5):
 			print '\nIter No: %d' % t
 			# step 2.1: fix Hp, Hq, optimize W
 			W = np.dot(invRM, np.dot(KK.T, H))
-			# W = -np.dot(invRM, np.dot(KK.T, QH[:,l:]))
 			evaor(P, H, W, KK, mu, self.lmda, self.r, 2)
 
 			# step 2.2: fix W, optimize H
@@ -132,8 +137,13 @@ class Sparse_DKSH(object):
 				fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,H)**2) - mu * np.dot(KK_W[:,rr], x)
 				gra = lambda x: -2*self.r*(2*P.T.dot(P.dot(x)) - np.sum(x)) + 2*np.dot(H,np.dot(x,H)) - mu * KK_W[:,rr]
 				res = minimize(fun, h, method='L-BFGS-B', jac=gra, bounds=bnds, options={'disp': False, 'maxiter':500, 'maxfun':500})
-				h[:] = np.where(res.x>=0, 1, -1)
-				H[:,rr] = h
+				h1[:] = np.where(res.x>=0, 1, -1)
+				# JUST FOR EXPERIMENT
+				if fun(h1) <= fun(h):
+					H[:,rr] = h1
+				else:
+					H[:,rr] = h
+				# END FOR EXPERIMENT
 
 			evaor(P, H, W, KK, mu, self.lmda, self.r, 1)
 

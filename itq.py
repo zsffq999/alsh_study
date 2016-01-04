@@ -1,7 +1,7 @@
 import numpy as np
 from data import hash_value, hash_evaluation
-from scipy.linalg import eigh
 import time
+from ksh import RBF
 
 
 class ITQ(object):
@@ -11,6 +11,7 @@ class ITQ(object):
 		self.n_iter = n_iter
 		self.reg = reg
 		self.l = l
+		self.W = None
 
 	def train(self, traindata, trainlabel=None):
 		n = len(traindata)
@@ -28,8 +29,8 @@ class ITQ(object):
 		V = np.dot(traindata-self.mean, self.Evecs)
 
 		# PCA-ITQ
-		if type == 'pca':
-			R = np.random.normal(self.r, self.r)
+		if self.type == 'pca':
+			R = np.random.normal(size=(self.r, self.r))
 			R, _, _ = np.linalg.svd(R)
 			for i in xrange(self.n_iter):
 				Z = np.dot(V, R)
@@ -59,9 +60,57 @@ class ITQ(object):
 
 			r, Wx = np.linalg.eig(Z)   # basis in h (X)
 			r = np.sqrt(np.real(r)) # as the original r we get is lamda^2
-			Wx = invRx * Wx   # actual Wx values
+			Wx = np.dot(invRx, Wx)   # actual Wx values
 
 			index = np.argsort(r)[::-1]
 			Wx = Wx[:,index]
 			r = r[index]
+			print Wx.shape
 			self.W = Wx * r.reshape((1,self.r))
+
+	def queryhash(self, qdata):
+		if self.type != 'kernel':
+			Kdata = np.dot(qdata-self.mean, self.Evecs)
+			Y = np.dot(Kdata, self.W)
+			Y = np.where(Y>=0, 1, 0)
+			return hash_value(Y)
+		else:
+			pass
+
+	def basehash(self, data):
+		return self.queryhash(data)
+
+
+def test():
+	X = np.load('data/cifar_gist.npy')
+	Y = np.load('data/cifar_label.npy')
+	idx = np.arange(60000, dtype=np.int32)
+	np.random.shuffle(idx)
+	X = X[idx]
+	Y = Y[idx]
+	traindata = X[:59000]
+	trainlabel = Y[:59000]
+	basedata = X[:59000]
+	baselabel = Y[:59000]
+	testdata = X[59000:]
+	testlabel = Y[59000:]
+
+	# make labels
+	gnd_truth = np.array([y == baselabel for y in testlabel]).astype(np.int8)
+
+	# train model
+	ksh = ITQ(48, 'pca', 10)
+	tic = time.clock()
+	ksh.train(traindata, trainlabel)
+	# ksh = ksh2.KSH(5000, 300, 12, traindata, trainlabel, RBF)
+	toc = time.clock()
+	print 'time:', toc-tic
+	H_base = ksh.basehash(basedata)
+	H_test = ksh.queryhash(testdata)
+
+	# evaluate
+	res = hash_evaluation(H_test, H_base, gnd_truth, 59000)
+	print 'MAP:', res['map']
+
+if __name__ == "__main__":
+	test()
