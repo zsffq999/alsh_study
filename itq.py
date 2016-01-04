@@ -1,11 +1,13 @@
 import numpy as np
 from data import hash_value, hash_evaluation
 import time
+from scipy.linalg import solve
 from ksh import RBF
+import scipy.io as sio
 
 
 class ITQ(object):
-	def __init__(self, r, type, l=0, n_iter=50, reg=1e-4):
+	def __init__(self, r, type, l=0, n_iter=100, reg=1e-4, kernel_param=None):
 		self.r = r
 		self.type = type # 'pca', 'cca', 'kernel'
 		self.n_iter = n_iter
@@ -13,19 +15,25 @@ class ITQ(object):
 		self.l = l
 		self.W = None
 		self.R = None
+		self.kernel_param = kernel_param
 
 	def train(self, traindata, trainlabel=None):
 		n = len(traindata)
 		# kernel transformation first
 		if self.type == 'kernel':
-			pass
+			idx = np.arange(n, dtype=np.int32)
+			np.random.shuffle(idx)
+			self.anchors = traindata[idx[:self.kernel_param['m']]]
+			X =self.kernel_param['kernel'](traindata, self.anchors)
+		else:
+			X = traindata
 
 		# centering data
-		self.mean = np.mean(traindata, axis=0).reshape((1,traindata.shape[1]))
+		self.mean = np.mean(X, axis=0).reshape((1,X.shape[1]))
 
 		if self.type == 'pca':
 			# PCA
-			S = np.cov(traindata.T)
+			S = np.cov(X.T)
 			Evecs, _, _ = np.linalg.svd(S)
 			self.W = Evecs[:,:self.r]
 		elif self.type == 'cca' or self.type == 'kernel':
@@ -33,19 +41,18 @@ class ITQ(object):
 			# make label vector
 			Y = np.zeros((n,self.l), dtype=np.float32)
 			Y[np.arange(n, dtype=np.int32), trainlabel] = 1
-			z = np.hstack((traindata-self.mean, Y))
+			z = np.hstack((X-self.mean, Y))
 			C = np.cov(z.T)
 
-			sx = traindata.shape[1]
+			sx = X.shape[1]
 			sy = self.l
 			Cxx = C[:sx,:sx] + self.reg*np.eye(sx)
 			Cxy = C[:sx,sx:]
 			Cyx = Cxy.T
 			Cyy = C[sx:,sx:] + self.reg*np.eye(sy)
-
-			Rx = np.linalg.cholesky(Cxx)
+			Rx = np.linalg.cholesky(Cxx).T
 			invRx = np.linalg.inv(Rx)
-			Z = np.dot(np.dot(np.dot(invRx.T, Cxy), np.linalg.solve(Cyy, Cyx)), invRx)
+			Z = np.dot(np.dot(np.dot(invRx.T, Cxy), solve(Cyy, Cyx)), invRx)
 			Z = 0.5*(Z+Z.T)
 
 			r, Wx = np.linalg.eig(Z)   # basis in h (X)
@@ -59,7 +66,7 @@ class ITQ(object):
 			self.W = Wx * r.reshape((1,self.r))
 
 		# ITQ
-		V = np.dot(traindata-self.mean, self.W)
+		V = np.dot(X-self.mean, self.W)
 		R = np.random.normal(size=(self.r, self.r))
 		R, _, _ = np.linalg.svd(R)
 		for i in xrange(self.n_iter):
@@ -73,17 +80,18 @@ class ITQ(object):
 	def queryhash(self, qdata):
 		if self.type != 'kernel':
 			Kdata = np.dot(qdata-self.mean, self.W)
-			Y = np.dot(Kdata, self.R)
-			Y = np.where(Y>=0, 1, 0)
-			return hash_value(Y)
 		else:
-			pass
+			Kdata = np.dot(self.kernel_param['kernel'](qdata, self.anchors), self.W)
+		Y = np.dot(Kdata, self.R)
+		Y = np.where(Y>=0, 1, 0)
+		return hash_value(Y)
 
 	def basehash(self, data):
 		return self.queryhash(data)
 
 
 def test():
+	np.random.seed(47)
 	X = np.load('data/cifar_gist.npy')
 	Y = np.load('data/cifar_label.npy')
 	idx = np.arange(60000, dtype=np.int32)
@@ -96,18 +104,19 @@ def test():
 	baselabel = Y[:59000]
 	testdata = X[59000:]
 	testlabel = Y[59000:]
-
+	
+	
 	# make labels
 	gnd_truth = np.array([y == baselabel for y in testlabel]).astype(np.int8)
 
 	# train model
-	ksh = ITQ(48, 'pca', 10)
+	ksh = ITQ(64, 'cca', 10)
 	tic = time.clock()
 	ksh.train(traindata, trainlabel)
 	# ksh = ksh2.KSH(5000, 300, 12, traindata, trainlabel, RBF)
 	toc = time.clock()
 	print 'time:', toc-tic
-	H_base = ksh.basehash(basedata)
+	H_base = ksh.basehash(traindata)
 	H_test = ksh.queryhash(testdata)
 
 	# evaluate
