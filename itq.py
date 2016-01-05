@@ -7,7 +7,7 @@ import scipy.io as sio
 
 
 class ITQ(object):
-	def __init__(self, r, type, l=0, n_iter=100, reg=1e-4, kernel_param=None):
+	def __init__(self, r, type, l=0, n_iter=50, reg=1e-4, kernel_param=None):
 		self.r = r
 		self.type = type # 'pca', 'cca', 'kernel'
 		self.n_iter = n_iter
