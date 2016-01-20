@@ -31,6 +31,7 @@ class AGH(object):
 		self.anchors = traindata[anchoridx]
 
 		(Z, sigma) = self._Z(traindata, self.anchors, self.nnanchors, self.sigma)
+		self.sigma = sigma
 		self.W = self._W(Z, self.numhashbits)
 
 	def queryhash(self, data):

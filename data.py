@@ -1,6 +1,7 @@
 import numpy as np
 import time
 import matplotlib.pyplot as plt
+import sys
 
 
 bit_num_in_uint8 = np.array([0, 1, 1, 2, 1, 2, 2, 3, 1, 2, 2, 3, 2, 3, 3, 4, 1, 2, 2, 3, 2, 3, 3, 4, 2, 3, 3, 4, 3, 4, \
