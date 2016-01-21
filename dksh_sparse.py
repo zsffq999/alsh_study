@@ -5,6 +5,8 @@ from ksh import RBF
 import time
 from scipy.optimize import minimize
 from scipy.sparse import csc_matrix, csr_matrix
+from sklearn.svm import LinearSVC
+from sklearn.linear_model import LogisticRegression
 
 
 class Sparse_DKSH(object):
@@ -23,7 +25,10 @@ class Sparse_DKSH(object):
 
 		# tuning parameters
 		self.mu = 1e-4
-		self.lmda = 0
+		self.lmda = 0.01
+
+		# classifiers in W-step
+		self.classifier = 'SVM'
 
 	def train(self, traindata, trainlabel):
 		n = len(traindata)
@@ -58,6 +63,7 @@ class Sparse_DKSH(object):
 		# projection optimization
 		RM = np.dot(KK.T, KK)
 		W = np.zeros((self.m, self.r), dtype=np.float32) # parameter W
+		b = np.zeros(self.r) # parameter b
 		LM = self.r*(2*np.dot(P.dot(KK).T, P.dot(KK)) - np.dot(np.sum(KK.T, axis=1, keepdims=True), np.sum(KK, axis=0, keepdims=True)))
 
 		# Evaluator
@@ -96,11 +102,13 @@ class Sparse_DKSH(object):
 				W[:,rr] *= np.sqrt(n/tmp)
 
 				# JUST FOR EXPERIMENT
+				'''
 				h1[:] = np.where(np.dot(KK, W[:,rr]) > 0, 1, -1)
 				H[:,rr] = 0
 				fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,H)**2)
 				if fun(h1) <= fun(h0):
 					h0[:] = h1[:]
+				'''
 				# END FOR EXPERIMENT
 
 				tmp = np.dot(KK.T, h0.reshape((n,1)))
@@ -117,14 +125,32 @@ class Sparse_DKSH(object):
 		# step 2: discrete optimization
 		print '\nSTEP 2: Discrete Optimization...'
 		RM += self.lmda * np.eye(self.m)
-		invRM = np.linalg.inv(RM)
 		h = np.zeros(n)
 		h1 = np.zeros(n)
 		bnds = [(-1,1) for i in xrange(n)]
+		if self.classifier == 'LogR':
+			cls = []
+			for i in xrange(self.r):
+				cls.append(LogisticRegression(C=1.0/self.lmda))
+		elif self.classifier == 'SVM':
+			cls = []
+			for i in xrange(self.r):
+				cls.append(LinearSVC(C=1.0/self.lmda))
+		else:
+			invRM = np.linalg.inv(RM)
+
 		for t in range(5):
 			print '\nIter No: %d' % t
-			# step 2.1: fix Hp, Hq, optimize W
-			W = np.dot(invRM, np.dot(KK.T, H))
+			# step 2.1: fix H, optimize W
+			# For SVM or LR
+			if self.classifier == 'SVM' or self.classifier == 'LogR':
+				for rr in xrange(self.r):
+					cls[rr].fit(KK, H[:,rr])
+					W[:,rr] = cls[rr].coef_[0]
+					b[rr] = cls[rr].intercept_[0]
+			else:
+				W = np.dot(invRM, np.dot(KK.T, H))
+
 			evaor(P, H, W, KK, mu, self.lmda, self.r, 2)
 
 			# step 2.2: fix W, optimize H
@@ -134,16 +160,21 @@ class Sparse_DKSH(object):
 					print 'rr:', rr
 				h[:] = H[:,rr]
 				H[:,rr] = 0
-				fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,H)**2) - mu * np.dot(KK_W[:,rr], x)
-				gra = lambda x: -2*self.r*(2*P.T.dot(P.dot(x)) - np.sum(x)) + 2*np.dot(H,np.dot(x,H)) - mu * KK_W[:,rr]
+				if self.classifier == 'SVM':
+					fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,H)**2) - mu / self.lmda * np.sum(np.where(x*KK_W[:,rr]>1, 0, 1-x*KK_W[:,rr]))
+					gra = lambda x: -2*self.r*(2*P.T.dot(P.dot(x)) - np.sum(x)) + 2*np.dot(H,np.dot(x,H)) - mu / self.lmda * np.where(KK_W[:,rr]>=0, np.where(x<1.0/KK_W[:,rr], KK_W[:,rr], 0), np.where(x>1.0/KK_W[:,rr], KK_W[:,rr], 0))
+				elif self.classifier == 'LogR':
+					fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,H)**2) - mu / self.lmda * np.log(1.0+np.exp(-x*KK_W[:,rr]))
+					gra = lambda x: -2*self.r*(2*P.T.dot(P.dot(x)) - np.sum(x)) + 2*np.dot(H,np.dot(x,H)) - mu / self.lmda * (-KK_W[:,rr]) / (1.0+np.exp(x*KK_W[:,rr]))
+				else:
+					fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,H)**2) - mu * np.dot(KK_W[:,rr], x)
+					gra = lambda x: -2*self.r*(2*P.T.dot(P.dot(x)) - np.sum(x)) + 2*np.dot(H,np.dot(x,H)) - mu * KK_W[:,rr]
 				res = minimize(fun, h, method='L-BFGS-B', jac=gra, bounds=bnds, options={'disp': False, 'maxiter':500, 'maxfun':500})
 				h1[:] = np.where(res.x>=0, 1, -1)
-				# JUST FOR EXPERIMENT
 				if fun(h1) <= fun(h):
 					H[:,rr] = h1
 				else:
 					H[:,rr] = h
-				# END FOR EXPERIMENT
 
 			evaor(P, H, W, KK, mu, self.lmda, self.r, 1)
 
