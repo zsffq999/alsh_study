@@ -9,7 +9,7 @@ from sklearn.svm import LinearSVC
 from sklearn.linear_model import LogisticRegression
 
 
-class Sparse_DKSH(object):
+class Sparse_DKSH_lb(object):
 	def __init__(self, r, m, numlabel, kernel):
 		self.r = r # num of hash bits
 		self.m = m # num of anchors
@@ -25,14 +25,13 @@ class Sparse_DKSH(object):
 
 		# tuning parameters
 		self.mu = 1e-4
-		self.lmda = 0.01
+		self.lmda = 0
 
 		# classifiers in W-step
-		self.classifier = 'SVM'
+		self.classifier = 'LineR'
 
 	def train(self, traindata, trainlabel):
 		n = len(traindata)
-		mu = self.mu * n
 		# shuffle data
 		indexes = np.arange(n, dtype=np.int32)
 		np.random.shuffle(indexes)
@@ -55,9 +54,11 @@ class Sparse_DKSH(object):
 			assert trainlabel.shape[1] == self.numlabel
 			P = csc_matrix(trainlabel, dtype=np.float32)
 			P = P.T
+			mu = self.mu * n
 		else:
 			P = csc_matrix((np.ones(n),[np.arange(n, dtype=np.int32), trainlabel]), shape=(n,self.numlabel), dtype=np.float32)
 			P = P.T
+			mu = self.mu * (self.numlabel**2) / float(n)
 		H = np.zeros((n,self.r))
 
 		# projection optimization
@@ -88,8 +89,7 @@ class Sparse_DKSH(object):
 		evaor(P, H, W, KK, mu, self.lmda, self.r, 1)
 
 		# step 1.2: batch coordinate optimization for some loops
-		h1 = np.zeros(n)
-		for t in range(5):
+		for t in range(0):
 			print 'step 1.{}...'.format(t+2)
 			for rr in range(self.r):
 				h0[:] = H[:,rr]
@@ -101,33 +101,31 @@ class Sparse_DKSH(object):
 				tmp = np.dot(np.dot(W[:,rr].T, RM), W[:,rr])
 				W[:,rr] *= np.sqrt(n/tmp)
 
-				# JUST FOR EXPERIMENT
-				'''
-				h1[:] = np.where(np.dot(KK, W[:,rr]) > 0, 1, -1)
-				H[:,rr] = 0
-				fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,H)**2)
-				if fun(h1) <= fun(h0):
-					h0[:] = h1[:]
-				'''
-				# END FOR EXPERIMENT
-
 				tmp = np.dot(KK.T, h0.reshape((n,1)))
 				LM -= np.dot(tmp, tmp.T)
 
 				H[:,rr] = h0
 
 		evaor(P, H, W, KK, mu, self.lmda, self.r, 1)
-		# TSP
-		# PH[:,l:] = np.where(np.random.rand(n,self.r)>0.5,1,-1)
-		# QH[:,l:] = -PH[:,l:]
-		# evaor(PH, QH, W, KK, mu, self.lmda, self.r, 1)
 
 		# step 2: discrete optimization
 		print '\nSTEP 2: Discrete Optimization...'
+		# initilize according to labels, assume that hashcode learned by bcd are the same in the same label.
+		P = csc_matrix((np.ones(self.numlabel),[np.arange(self.numlabel, dtype=np.int32), np.arange(self.numlabel, dtype=np.int32)]), shape=(self.numlabel,self.numlabel), dtype=np.float32)
+		P = P.T
+		HL = np.zeros((self.numlabel, self.r))
+		lcnt = np.bincount(trainlabel)
+		for rr in xrange(self.r):
+			HL[:,rr] = np.bincount(trainlabel, H[:,rr]) / lcnt
+		labelidx = []
+		for l in xrange(self.numlabel):
+			labelidx.append(np.argwhere(trainlabel==l)[:,0])
+
+		h = np.zeros(self.numlabel)
+		h1 = np.zeros(self.numlabel)
+		bnds = [(-1,1) for i in xrange(self.numlabel)]
+
 		RM += self.lmda * np.eye(self.m)
-		h = np.zeros(n)
-		h1 = np.zeros(n)
-		bnds = [(-1,1) for i in xrange(n)]
 		if self.classifier == 'LogR':
 			cls = []
 			for i in xrange(self.r):
@@ -156,25 +154,29 @@ class Sparse_DKSH(object):
 			# step 2.2: fix W, optimize H
 			KK_W = np.dot(KK, W)
 			for rr in range(self.r):
+				KK_W_r = np.bincount(trainlabel, KK_W[:,rr])
 				if (rr+1) % 10 == 0:
 					print 'rr:', rr
-				h[:] = H[:,rr]
-				H[:,rr] = 0
+				h[:] = HL[:,rr]
+				HL[:,rr] = 0
 				if self.classifier == 'SVM':
-					fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,H)**2) - mu / self.lmda * np.sum(np.where(x*KK_W[:,rr]>1, 0, 1-x*KK_W[:,rr]))
-					gra = lambda x: -2*self.r*(2*P.T.dot(P.dot(x)) - np.sum(x)) + 2*np.dot(H,np.dot(x,H)) - mu / self.lmda * np.where(KK_W[:,rr]>=0, np.where(x<1.0/KK_W[:,rr], KK_W[:,rr], 0), np.where(x>1.0/KK_W[:,rr], KK_W[:,rr], 0))
+					fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,HL)**2) - mu / self.lmda * np.sum(np.where(x*KK_W_r>1, 0, 1-x*KK_W_r))
+					gra = lambda x: -2*self.r*(2*P.T.dot(P.dot(x)) - np.sum(x)) + 2*np.dot(HL,np.dot(x,HL)) - mu / self.lmda * np.where(KK_W_r>=0, np.where(x<1.0/KK_W_r, KK_W_r, 0), np.where(x>1.0/KK_W_r, KK_W_r, 0))
 				elif self.classifier == 'LogR':
-					fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,H)**2) - mu / self.lmda * np.log(1.0+np.exp(-x*KK_W[:,rr]))
-					gra = lambda x: -2*self.r*(2*P.T.dot(P.dot(x)) - np.sum(x)) + 2*np.dot(H,np.dot(x,H)) - mu / self.lmda * (-KK_W[:,rr]) / (1.0+np.exp(x*KK_W[:,rr]))
+					fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,HL)**2) - mu / self.lmda * np.log(1.0+np.exp(-x*KK_W_r))
+					gra = lambda x: -2*self.r*(2*P.T.dot(P.dot(x)) - np.sum(x)) + 2*np.dot(HL,np.dot(x,HL)) - mu / self.lmda * (-KK_W_r) / (1.0+np.exp(x*KK_W_r))
 				else:
-					fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,H)**2) - mu * np.dot(KK_W[:,rr], x)
-					gra = lambda x: -2*self.r*(2*P.T.dot(P.dot(x)) - np.sum(x)) + 2*np.dot(H,np.dot(x,H)) - mu * KK_W[:,rr]
+					fun = lambda x: -self.r*(2*np.sum(P.dot(x)**2) - np.sum(x)**2) + np.sum(np.dot(x,HL)**2) - mu * np.dot(KK_W_r, x)
+					gra = lambda x: -2*self.r*(2*P.T.dot(P.dot(x)) - np.sum(x)) + 2*np.dot(HL,np.dot(x,HL)) - mu * KK_W_r
 				res = minimize(fun, h, method='L-BFGS-B', jac=gra, bounds=bnds, options={'disp': False, 'maxiter':500, 'maxfun':500})
 				h1[:] = np.where(res.x>=0, 1, -1)
 				if fun(h1) <= fun(h):
-					H[:,rr] = h1
+					HL[:,rr] = h1
 				else:
-					H[:,rr] = h
+					HL[:,rr] = h
+
+			for l in xrange(self.numlabel):
+				H[labelidx[l]] = HL[l]
 
 			evaor(P, H, W, KK, mu, self.lmda, self.r, 1)
 
@@ -218,15 +220,15 @@ def test():
 	X = np.load('data/cifar_gist.npy')
 	Y = np.load('data/cifar_label.npy')
 
-	traindata = X[:5000]
-	trainlabel = Y[:5000]
+	traindata = X[:59000]
+	trainlabel = Y[:59000]
 	basedata = X[:59000]
 	baselabel = Y[:59000]
 	testdata = X[59000:]
 	testlabel = Y[59000:]
 
 	# train model
-	dksh = Sparse_DKSH(32, 1000, 10, RBF)
+	dksh = Sparse_DKSH(64, 1000, 10, RBF)
 	tic = time.clock()
 	dksh.train(traindata, trainlabel)
 	toc = time.clock()
