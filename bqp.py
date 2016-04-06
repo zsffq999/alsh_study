@@ -78,17 +78,15 @@ class AMF_BQP(BQP):
 		P[:,self.Y.shape[1]] = np.sqrt(np.abs(self.b))
 		P[:,self.Y.shape[1]+1:] = self.H
 		s, v, d = np.linalg.svd(P, full_matrices=False)
-		d1 = np.zeros(d.shape)
+		d1 = np.copy(d)
 		if self.a < 0:
-			d1[:,:self.Y.shape[1]] = -d[:,:self.Y.shape[1]]
+			d1[:,:self.Y.shape[1]] = -d1[:,:self.Y.shape[1]]
 		if self.b < 0:
-			d1[:,self.Y.shape[1]] = -d[:,self.Y.shape[1]]
-		d1[:,self.Y.shape[1]+1:] = -d[:,self.Y.shape[1]+1:]
-		_s, _v, _ = np.linalg.svd(np.dot(v.reshape((v.shape[0],1))*d, (v.reshape((v.shape[0],1))*d1).T))
-		print _v
-		s1, v1, d1 = np.linalg.svd(2*r*Y.dot(Y.T).toarray()-r-np.dot(H,H.T))
-		print v1[:40]
-		return np.dot(s, _s[:,0])
+			d1[:,self.Y.shape[1]] = -d1[:,self.Y.shape[1]]
+		d1[:,self.Y.shape[1]+1:] = -d1[:,self.Y.shape[1]+1:]
+		_s, _v = np.linalg.eig(np.dot(v.reshape((v.shape[0],1))*d, (v.reshape((v.shape[0],1))*d1).T))
+		# s1, v1, d1 = np.linalg.svd(2*r*Y.dot(Y.T).toarray()-r-np.dot(H,H.T))
+		return np.dot(s, _s[:,:3])
 
 	def col_sum(self, col_ind):
 		return np.dot(self.P, np.sum(self.Q[col_ind], axis=0))
@@ -115,7 +113,11 @@ def bqp_spec(bqp, init=None):
 	binary quadratic programming with spectual method
 	:return:
 	'''
-	return np.where(bqp.max_eigen()>0, 1, -1)
+	vs = bqp.max_eigen()
+	print bqp.neg_obj(vs[:,0])
+	print bqp.neg_obj(vs[:,1])
+	print bqp.neg_obj(vs[:,2])
+	return np.where(vs[:,0]>0, 1, -1)
 
 
 def bqp_cluster(bqp, init=None):
@@ -161,7 +163,6 @@ if __name__ == '__main__':
 	def obj():
 		Tmp = 2*Y.dot(Y.T).toarray()-1-np.dot(H,H.T)/float(r)
 		return np.sum(np.sum(Tmp*Tmp, axis=1), axis=0)
-
 
 	h = np.zeros(n)
 	for t in xrange(5):
