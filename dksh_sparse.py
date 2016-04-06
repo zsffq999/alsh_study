@@ -25,10 +25,10 @@ class Sparse_DKSH(object):
 
 		# tuning parameters
 		self.mu = 1e-4
-		self.lmda = 0.01
+		self.lmda = 0
 
 		# classifiers in W-step
-		self.classifier = 'SVM'
+		self.classifier = 'LineR'
 
 	def train(self, traindata, trainlabel):
 		n = len(traindata)

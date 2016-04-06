@@ -132,7 +132,7 @@ def bqp_cluster(bqp, init=None):
 	maxiter = 10
 	q = 0.5*bqp.q - bqp.col_sum(range(n))
 	diag = bqp.diag()
-	lamb = 0
+	lamb = 32
 	lamb_diag = lamb - diag
 
 	# initialize cluster
@@ -176,7 +176,7 @@ if __name__ == '__main__':
 			h[:] = H[:,rr]
 			H[:,rr] = 0
 			bqp = AMF_BQP(Y, 2*r, -r, H)
-			h1 = bqp_cluster(bqp, h)
+			h1 = bqp_relax(bqp, h)
 			# print h1
 			if bqp.neg_obj(h1) < bqp.neg_obj(h) or t == 0:
 				H[:,rr] = h1
