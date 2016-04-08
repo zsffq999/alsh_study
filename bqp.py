@@ -65,6 +65,8 @@ class AMF_BQP(BQP):
 		self.H = H
 		if q == None:
 			self.q = np.zeros(Y.shape[0])
+		else:
+			self.q = q
 
 	def neg_obj(self, x):
 		return (-self.a)*np.sum(self.Y.T.dot(x)**2) - self.b*np.sum(x)**2 + np.sum(np.dot(x,self.H)**2) - np.dot(self.q, x)
@@ -94,7 +96,7 @@ class AMF_BQP(BQP):
 	def col_sum(self, col_ind):
 		n_tmp = len(col_ind)
 		Y_tmp = self.Y[col_ind].sum(axis=0).A[0]
-		return self.a*self.Y.dot(Y_tmp) + self.b * n_tmp - np.dot(H, np.sum(H[col_ind], axis=0))
+		return self.a*self.Y.dot(Y_tmp) + self.b * n_tmp - np.dot(self.H, np.sum(self.H[col_ind], axis=0))
 
 	def diag(self):
 		return (self.a*self.Y.multiply(self.Y).sum(axis=1)).A[:,0] + self.b
@@ -143,10 +145,10 @@ def bqp_cluster(bqp, init):
 	for i in xrange(maxiter):
 		dist_to_cluster = bqp.col_sum(cluster) + 0.5*q
 		dist_to_cluster[cluster] += lamb_diag[cluster]
-		#print i, dist_to_cluster
+		# print i, dist_to_cluster
 		med = np.median(dist_to_cluster)
 		new_res = np.where(dist_to_cluster>med, 1, -1)
-		print np.sum(res==1), np.sum(new_res==1),np.sum(res != new_res)
+		# print np.sum(res==1), np.sum(new_res==1),np.sum(res != new_res)
 		if np.sum(res != new_res) < 3:
 			break
 		cluster = np.argwhere(new_res >= 0)[:,0]
@@ -194,17 +196,10 @@ def bqp_cluster_opt(bqp, init=None):
 			dist_to_cluster_2 /= len(cluster_2)+1
 			q_dist_2 = (np.sum(q[cluster_2])) / (len(cluster_2) + 1)
 			q_dist_1 = np.mean(q[cluster_1])
-		#print i, len(cluster_1), dist_to_cluster_1, len(cluster_2), dist_to_cluster_2
 		new_res = np.where(dist_to_cluster_1 >= dist_to_cluster_2, 1, -1)
-		#new_cluster_1 = np.argwhere(dist_to_cluster_1 >= dist_to_cluster_2)[:,0]
-		#new_cluster_2 = np.argwhere(dist_to_cluster_1 < dist_to_cluster_2)[:,0]
 		new_q_cluster_no = 1 if q_dist_1 >= q_dist_2 else 2
-		print new_res
-		print np.sum(res==1), np.sum(new_res==1),np.sum(res != new_res)
 		if np.sum(res != new_res) + (new_q_cluster_no != q_cluster_no) <= 4:
 			break
-		#if np.all(new_cluster_1 == cluster_1) and new_q_cluster_no == q_cluster_no:
-		#	break
 		res = new_res
 		cluster_1 = np.argwhere(res>=0)[:,0]
 		cluster_2 = np.argwhere(res<0)[:,0]
@@ -214,16 +209,16 @@ def bqp_cluster_opt(bqp, init=None):
 		res = -res
 
 	# find final cluster
-	q -= 0.5*bqp.col_sum(range(n))
+	q -= 0.25*bqp.col_sum(range(n))
 	cluster = np.argwhere(res >= 0)[:,0]
 
 	for i in xrange(maxiter):
-		dist_to_cluster = bqp.col_sum(cluster) + 0.5*q
+		dist_to_cluster = bqp.col_sum(cluster) + q
 		dist_to_cluster[cluster] += lamb_diag[cluster]
 		# print i, dist_to_cluster
 		med = np.median(dist_to_cluster)
 		new_res = np.where(dist_to_cluster>med, 1, -1)
-		print np.sum(res==1), np.sum(new_res==1),np.sum(res != new_res)
+		# print np.sum(res==1), np.sum(new_res==1),np.sum(res != new_res)
 		if np.sum(res != new_res) < 3:
 			break
 		cluster = np.argwhere(new_res >= 0)[:,0]
@@ -232,37 +227,66 @@ def bqp_cluster_opt(bqp, init=None):
 	return res
 
 
+def bqp_combine(bqp, init):
+	h_tmp = bqp_cluster(bqp, init)
+	h = bqp_relax(bqp, h_tmp)
+	return h
+
+
 def test():
-	n = 5000
-	numlabel = 10
-	r = 32
-	trainlabel = np.random.randint(0,10, size=n)
-	Y = csc_matrix((np.ones(n),[np.arange(n, dtype=np.int32), trainlabel]), shape=(n,10), dtype=np.float32)
-	H = np.where(np.random.rand(n,r)>0.5, 1, -1)
+	tot_time = []
+	tot_loss = []
+	for ttt in xrange(20):
+		n = 5000
+		numlabel = 10
+		r = 32
+		# generate multi labels
+		n_ind = []
+		l_ind = []
+		labels = np.arange(numlabel, dtype=np.int32)
+		for i in xrange(n):
+			num = np.random.poisson() + 1
+			# num = 1
+			n_ind += [i] * num
+			np.random.shuffle(labels)
+			l_ind += labels[:num].tolist()
 
-	def obj():
-		Tmp = 2*Y.dot(Y.T).toarray()-1-np.dot(H,H.T)/float(r)
-		return np.sum(np.sum(Tmp*Tmp, axis=1), axis=0)
+		Y = csc_matrix((np.ones(len(n_ind)),[n_ind, l_ind]), shape=(n,10), dtype=np.float32)
+		H = np.where(np.random.rand(n,r)>0.5, 1, -1)
 
-	h = np.zeros(n)
-	import time
-	tic = time.clock()
-	for t in xrange(3):
-		for rr in xrange(r):
-			h[:] = H[:,rr]
-			H[:,rr] = 0
-			bqp = AMF_BQP(Y, 2*r, -r, H)
-			h1 = bqp_cluster_opt(bqp, h)
-			# print h1
-			if bqp.neg_obj(h1) < bqp.neg_obj(h) or t == 0:
-				H[:,rr] = h1
-			else:
-				H[:,rr] = h
-			# print 'iter: {}, rr: {}, obj: {}'.format(t, rr, obj())
-	toc = time.clock()
+		def obj():
+			Tmp = 2*Y.dot(Y.T).toarray()-1-np.dot(H,H.T)/float(r)
+			return np.sum(np.sum(Tmp*Tmp, axis=1), axis=0)
+
+		h = np.zeros(n)
+		import time
+		tic = time.clock()
+		for t in xrange(3):
+			for rr in xrange(r):
+				h[:] = H[:,rr]
+				H[:,rr] = 0
+				bqp = AMF_BQP(Y, 2*r, -r, H)
+				h2 = bqp_cluster(bqp, h)
+				h1 = bqp_relax(bqp, h2)
+				# print h1
+				if bqp.neg_obj(h1) < bqp.neg_obj(h) or t == 0:
+					H[:,rr] = h1
+				else:
+					H[:,rr] = h
+				# print 'iter: {}, rr: {}, obj: {}'.format(t, rr, obj())
+
+		toc = time.clock()
+		#loss = obj()
+		tot_time.append(toc-tic)
+		#tot_loss.append(loss)
+		print 'round', ttt, toc-tic
+	#print np.mean(tot_loss), np.std(tot_loss)
+	print np.mean(tot_time), np.std(tot_time)
 
 
 if __name__ == '__main__':
+	test()
+	'''
 	n = 5000
 	numlabel = 10
 	r = 32
@@ -291,3 +315,4 @@ if __name__ == '__main__':
 			print 'iter: {}, rr: {}, obj: {}'.format(t, rr, obj())
 	toc = time.clock()
 	print 'obj: {}; time: {}'.format(obj(), toc-tic)
+	'''
