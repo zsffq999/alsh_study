@@ -54,10 +54,10 @@ class Sparse_DKSH(object):
 		# pairwise label matrix, S = 2*P*P.T-1_{n*n}
 		if len(trainlabel.shape) >= 2:
 			assert trainlabel.shape[1] == self.numlabel
-			P = csc_matrix(trainlabel, dtype=np.float32)
+			P = csr_matrix(trainlabel, dtype=np.float32)
 			P = P.T
 		else:
-			P = csc_matrix((np.ones(n),[np.arange(n, dtype=np.int32), trainlabel]), shape=(n,self.numlabel), dtype=np.float32)
+			P = csr_matrix((np.ones(n),[np.arange(n, dtype=np.int32), trainlabel]), shape=(n,self.numlabel), dtype=np.float32)
 			P = P.T
 		H = np.zeros((n,self.r))
 
