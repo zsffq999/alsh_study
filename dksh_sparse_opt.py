@@ -3,7 +3,6 @@ from data import hash_value, hash_evaluation
 from scipy.linalg import eigh
 from ksh import RBF
 import time
-from scipy.optimize import minimize
 from scipy.sparse import csc_matrix, csr_matrix
 from sklearn.svm import LinearSVC
 from sklearn.linear_model import LogisticRegression
@@ -139,6 +138,8 @@ class Sparse_DKSH(object):
 				b[rr] = b_
 
 		'''
+		# bqp = AMF_BQP(P.T, 2*self.r, -self.r, H)
+		bqp = AMF_deg3_BQP(P.T, 1.0/3*self.r, -2*self.r, 11.0/3*self.r, -self.r, H)
 		for t in range(5):
 			print '\nIter No: %d' % t
 
@@ -157,8 +158,10 @@ class Sparse_DKSH(object):
 					q = -0.5 * mu / self.lmda * (np.log(1.0+np.exp(-KK_W[:,rr])) - np.log(1.0+np.exp(KK_W[:,rr])))
 				else:
 					q = KK_W[:,rr]
-				bqp = AMF_BQP(P.T, 2*self.r, -self.r, H, q)
-				h1[:] = bqp_relax(bqp, h)
+				# bqp = AMF_BQP(P.T, 2*self.r, -self.r, H, q)
+				bqp.H = H
+				bqp.q = q
+				h1[:] = bqp_cluster(bqp, h)
 				if bqp.neg_obj(h1) <= bqp.neg_obj(h):
 					H[:,rr] = h1
 				else:
@@ -181,6 +184,10 @@ class Sparse_DKSH(object):
 		self.trainlabel = trainlabel
 		self.H = np.copy(H)
 		self.b = b
+
+		np.save('data/hash_codes_b.npy',  np.where(np.dot(KK, self.W)+self.b>=0, 1, 0))
+		np.save('data/hash_codes_h.npy', H)
+		np.save('data/hash_label.npy', trainlabel)
 
 	def queryhash(self, qdata):
 		Kdata = self.kernel(qdata, self.anchors)

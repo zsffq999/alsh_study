@@ -48,7 +48,6 @@ uint16_t popcnt_cpu_64bit(const uint8_t* lhs, const uint8_t* rhs, const size_t n
 	
 	return res;
 }
-
 	
 void hamming_dist_mat(size_t code_len, uint8_t* code_Y, size_t size_Y, size_t block_sz_Y, uint8_t* code_X, size_t size_X, size_t block_sz_X, uint16_t* ret) {
 	uint32_t code_per_char = (code_len%8 == 0 ? (code_len/8) : (code_len/8) + 1);
@@ -99,49 +98,84 @@ void hamming_dist_mat(size_t code_len, uint8_t* code_Y, size_t size_Y, size_t bl
 
 int main(int argc, char** argv)
 {
-	int n = atoi(argv[1]);
+	int r = atoi(argv[1]);
+	int m = atoi(argv[2]);
+	int n = atoi(argv[3]);
+	int block_sz = atoi(argv[4]);
 	srand((int)time(NULL));
-	int *a = new int[n];
-	int *b = new int[n];
-	for (int i = 0; i < n; ++i) {
-		a[i] = rand() % 2;
-		b[i] = rand() % 2;
-	}
-	int hamm1 = 0;
-	for (int i = 0; i < n; ++i) {
-		hamm1 += (a[i] != b[i]);
-	}
-	std::cout << hamm1 << endl;
-	for (int i = 0; i < n; ++i) {
-		std::cout << a[i];
-	}
-	std::cout << endl;
-	for (int i = 0; i < n; ++i) {
-		std::cout << b[i];
-	}
-	std::cout << endl;
-
 	
-	uint8_t *c = new uint8_t[n/8];
-	uint8_t *d = new uint8_t[n/8];
-	for (int i = 0; i < n/8; ++i) {
-		uint8_t tmp = 0;
-		for (int j = 0; j < 8; ++j) {
-			tmp <<= 1;
-			tmp += a[i*8+j];
+	cout << "init..." << endl;
+	
+	int *a = new int[m*r];
+	int *b = new int[n*r];
+	for (int i = 0; i < m; ++i) {
+		for (int j = 0; j < r; ++j) {
+			a[i*r+j] = rand() % 2;
 		}
-		c[i] = tmp;
 	}
-	for (int i = 0; i < n/8; ++i) {
-		uint8_t tmp = 0;
-		for (int j = 0; j < 8; ++j) {
-			tmp <<= 1;
-			tmp += b[i*8+j];
+	
+	for (int i = 0; i < n; ++i) {
+		for (int j = 0; j < r; ++j) {
+			b[i*r+j] = rand() % 2;
 		}
-		d[i] = tmp;
 	}
-	uint16_t *res = new uint16_t[1];
-	hamming_dist_mat(n, d, 1, 1, c, 1, 1, res);
-	std::cout << res[0] << endl;
+	uint16_t *res_1 = new uint16_t[m*n];
+	for (int i = 0; i < m; ++i) {
+		for (int j = 0; j < n; ++j) {
+			uint16_t tmp = 0;
+			for (int k = 0; k < r; ++k) {
+				tmp += (a[i*r+k] != b[j*r+k]);
+			}
+			res_1[i*n+j] = tmp;
+		}
+	}
+	
+	cout << "preparing..." << endl;
+	
+	int bit_r = (r % 8 == 0 ? r/8 : r/8+1);
+
+	uint8_t *c = new uint8_t[m*bit_r];
+	uint8_t *d = new uint8_t[n*bit_r];
+	for (int t = 0; t < m; ++t) {
+		for (int i = 0; i < bit_r; ++i) {
+			uint8_t tmp = 0;
+			for (int j = 0; j < 8; ++j) {
+				if (i*8+j >= r) break;
+				tmp <<= 1;
+				tmp += a[t*r+i*8+j];
+			}
+			c[t*bit_r+i] = tmp;
+		}
+	}
+	
+	for (int t = 0; t < n; ++t) {
+		for (int i = 0; i < bit_r; ++i) {
+			uint8_t tmp = 0;
+			for (int j = 0; j < 8; ++j) {
+				if (i*8+j >= r) break;
+				tmp <<= 1;
+				tmp += b[t*r+i*8+j];
+			}
+			d[t*bit_r+i] = tmp;
+		}
+	}
+	
+
+	uint16_t *res = new uint16_t[m*n];
+	int tic = clock();
+	hamming_dist_mat(r, c, m, block_sz, d, n, block_sz, res);
+	int toc = clock();
+	
+	int tmp = 0;
+	for (int i = 0; i < m; ++i) {
+		for (int j = 0; j < n; ++j) {
+			//std::cout << i << " " << j << ": " << res[i*n+j] << " " << res_2[i*n+j] << " " << res_1[i*n+j] << endl;
+			if (res[i*n+j] == res_1[i*n+j]) {
+				tmp++;
+			}
+		}
+	}
+	std:cout << "time: " << toc-tic << "/" << CLOCKS_PER_SEC << endl;
+	std::cout << tmp << "/" << n*m << endl;
 	return 0;
 }

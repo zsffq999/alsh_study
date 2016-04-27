@@ -204,7 +204,7 @@ def bqp_cluster(bqp, init):
 		med = np.median(dist_to_cluster)
 		new_res = np.where(dist_to_cluster > med, 1, -1)
 		# print np.sum(res==1), np.sum(new_res==1),np.sum(res != new_res)
-		if np.sum(res != new_res) < 3:
+		if np.sum(res != new_res) < 0.001*n:
 			break
 		cluster = np.argwhere(new_res >= 0)[:, 0]
 		res = new_res
@@ -353,7 +353,7 @@ if __name__ == '__main__':
 	H = np.where(np.random.rand(n,r)>0.5, 1, -1)
 
 	def obj():
-		Tmp = 2*Y.dot(Y.T).toarray()-1-np.dot(H,H.T)/float(r)
+		Tmp = np.where(Y.dot(Y.T).toarray()>0, 1, -1)-np.dot(H,H.T)/float(r)
 		return np.sum(np.sum(Tmp*Tmp, axis=1), axis=0)
 
 	h = np.zeros(n)
