@@ -7,6 +7,10 @@ from scipy.sparse import csc_matrix, csr_matrix
 from sklearn.svm import LinearSVC
 from sklearn.linear_model import LogisticRegression
 from bqp import *
+from dl import cnn_hash
+
+import sys
+sys.path.extend(['./dl'])
 
 
 class Sparse_DKSH(object):
@@ -28,7 +32,7 @@ class Sparse_DKSH(object):
 		self.lmda = 1e-2
 
 		# classifiers in W-step
-		self.classifier = 'LineR'
+		self.classifier = 'CNN'
 
 	def train(self, traindata, trainlabel):
 		n = len(traindata)
@@ -38,17 +42,6 @@ class Sparse_DKSH(object):
 		np.random.shuffle(indexes)
 		traindata = traindata[indexes]
 		trainlabel = trainlabel[indexes]
-
-		# determine anchors
-		anchoridx = np.copy(indexes)
-		np.random.shuffle(anchoridx)
-		anchoridx = anchoridx[:self.m]
-		self.anchors = traindata[anchoridx]
-
-		# kernel matrix and mean
-		KK = self.kernel(traindata, self.anchors)
-		self.mvec = np.mean(KK, axis=0).reshape((1, self.m))
-		KK = KK - self.mvec
 
 		# pairwise label matrix, S = 2*P*P.T-1_{n*n}
 		if len(trainlabel.shape) >= 2:
@@ -60,36 +53,54 @@ class Sparse_DKSH(object):
 			P = P.T
 		H = np.zeros((n,self.r))
 
-		# projection optimization
-		RM = np.dot(KK.T, KK)
-		W = np.zeros((self.m, self.r), dtype=np.float32) # parameter W
-		b = np.zeros(self.r) # parameter b
-		LM = self.r*(2*np.dot(P.dot(KK).T, P.dot(KK)) - np.dot(np.sum(KK.T, axis=1, keepdims=True), np.sum(KK, axis=0, keepdims=True)))
 
-		# Evaluator
-		evaor = ObjEvaluate(0)
+		if self.classifier != 'CNN':
 
-		# step 1: initialize with spectral relaxation
-		# step 1.1: batch coordinate optimization
-		h0 = np.zeros(n)
-		print '\nSTEP 1: Initialize with spectral relaxation...'
-		print 'step 1.1...'
-		for rr in range(self.r):
-			if rr > 0:
-				tmp = np.dot(KK.T, h0.reshape((n,1)))
-				LM -= np.dot(tmp, tmp.T)
-			(V, U) = eigh(LM, RM, eigvals_only=False)
-			W[:,rr] = U[:,self.m-1]
-			tmp = np.dot(np.dot(W[:,rr].T, RM), W[:,rr])
-			W[:,rr] *= np.sqrt(n/tmp)
+			print 'enter...'
 
-			h0 = np.where(np.dot(KK, W[:,rr]) >= 0, 1, -1)
-			H[:,rr] = h0
-		evaor(P, H, W, KK, mu, self.lmda, self.r, 1)
+			# determine anchors
+			anchoridx = np.copy(indexes)
+			np.random.shuffle(anchoridx)
+			anchoridx = anchoridx[:self.m]
+			self.anchors = traindata[anchoridx]
+
+			# kernel matrix and mean
+			KK = self.kernel(traindata, self.anchors)
+			self.mvec = np.mean(KK, axis=0).reshape((1, self.m))
+			KK = KK - self.mvec
+
+			# projection optimization
+			RM = np.dot(KK.T, KK)
+			W = np.zeros((self.m, self.r), dtype=np.float32) # parameter W
+			b = np.zeros(self.r) # parameter b
+			LM = self.r*(2*np.dot(P.dot(KK).T, P.dot(KK)) - np.dot(np.sum(KK.T, axis=1, keepdims=True), np.sum(KK, axis=0, keepdims=True)))
+
+			# Evaluator
+			evaor = ObjEvaluate(0)
+
+			# step 1: initialize with spectral relaxation
+			# step 1.1: batch coordinate optimization
+			h0 = np.zeros(n)
+			print '\nSTEP 1: Initialize with spectral relaxation...'
+			print 'step 1.1...'
+			for rr in range(self.r):
+				if rr > 0:
+					tmp = np.dot(KK.T, h0.reshape((n,1)))
+					LM -= np.dot(tmp, tmp.T)
+				(V, U) = eigh(LM, RM, eigvals_only=False)
+				W[:,rr] = U[:,self.m-1]
+				tmp = np.dot(np.dot(W[:,rr].T, RM), W[:,rr])
+				W[:,rr] *= np.sqrt(n/tmp)
+
+				h0 = np.where(np.dot(KK, W[:,rr]) >= 0, 1, -1)
+				H[:,rr] = h0
+			evaor(P, H, W, KK, mu, self.lmda, self.r, 1)
+
+		else:
+			self.cls = cnn_hash.CNN_hash(self.r)
 
 		# step 2: discrete optimization
 		print '\nSTEP 2: Discrete Optimization...'
-		RM += self.lmda * np.eye(self.m)
 		h = np.zeros(n)
 		h1 = np.zeros(n)
 		if self.classifier == 'LogR':
@@ -100,36 +111,24 @@ class Sparse_DKSH(object):
 			cls = []
 			for i in xrange(self.r):
 				cls.append(LinearSVC(C=1.0/self.lmda))
-		else:
+		elif self.classifier == 'LineR':
+			RM += self.lmda * np.eye(self.m)
 			invRM = np.linalg.inv(RM)
+		else: # cnn
+
+			H = np.where(np.random.rand(n,self.r)>=0.5, 1, -1)
 
 
 		bqp = AMF_BQP(P.T, 2*self.r, -self.r, H)
 		# bqp = AMF_deg3_BQP(P.T, 1.0/3*self.r, -2*self.r, 11.0/3*self.r, -self.r, H)
 		for t in range(5):
 			print '\nIter No: %d' % t
-			# step 2.1: fix H, optimize W
-			# For SVM or LR
-			if self.classifier == 'SVM' or self.classifier == 'LogR':
-				for rr in xrange(self.r):
-					cls[rr].fit(KK, H[:,rr])
-					W[:,rr] = cls[rr].coef_[0]
-					b[rr] = cls[rr].intercept_[0]
-			else:
-				# random flipping some label of H
-				for rr in range(self.r):
-					tmp = np.sum(np.random.rand(n, 1)<0.9, axis=1) / float(1)
-					H[:,rr] = np.where(tmp>0.5, H[:,rr], -H[:,rr])
-				print H
-				W = np.dot(invRM, np.dot(KK.T, H))
 
-			Y = np.dot(KK, W) + b
-			H = np.where(Y>=0, 1, -1).astype(np.float32)
-
-			evaor(P, H, W, KK, mu, self.lmda, self.r, 2)
+			# evaor(P, H, W, KK, mu, self.lmda, self.r, 2)
 
 			# step 2.2: fix W, optimize H
-			KK_W = np.dot(KK, W)
+			if self.classifier != 'CNN':
+				KK_W = np.dot(KK, W)
 			for rr in range(self.r):
 				if (rr+1) % 10 == 0:
 					print 'rr:', rr
@@ -139,8 +138,10 @@ class Sparse_DKSH(object):
 					q = -0.5 * mu / self.lmda * (np.where(KK_W[:,rr]>1, 0, 1-KK_W[:,rr]) - np.where(KK_W[:,rr]<-1, 0, 1+KK_W[:,rr]))
 				elif self.classifier == 'LogR':
 					q = -0.5 * mu / self.lmda * (np.log(1.0+np.exp(-KK_W[:,rr])) - np.log(1.0+np.exp(KK_W[:,rr])))
-				else:
+				elif self.classifier == 'LineR':
 					q = KK_W[:,rr]
+				else:
+					q = np.zeros(n)
 				bqp.H = H
 				bqp.q = q
 				h1[:] = bqp_cluster(bqp, h)
@@ -149,7 +150,25 @@ class Sparse_DKSH(object):
 				else:
 					H[:,rr] = h
 
-			evaor(P, H, W, KK, mu, self.lmda, self.r, 1)
+			# evaor(P, H, W, KK, mu, self.lmda, self.r, 1)
+			# step 2.1: fix H, optimize W
+			# For SVM or LR
+			if self.classifier == 'SVM' or self.classifier == 'LogR':
+				for rr in xrange(self.r):
+					cls[rr].fit(KK, H[:,rr])
+					W[:,rr] = cls[rr].coef_[0]
+					b[rr] = cls[rr].intercept_[0]
+			elif self.classifier == 'LineR':
+				W = np.dot(invRM, np.dot(KK.T, H))
+			else:
+				self.cls.train(traindata, H)
+
+			Y = np.dot(KK, W) + b if self.classifier != 'CNN' else self.cls.predict(traindata)
+			if t-1 < 5:
+				H = np.where(Y>=0, 1, -1).astype(np.float32)
+
+			print Y
+			print H
 
 
 		self.W = W
@@ -162,6 +181,8 @@ class Sparse_DKSH(object):
 		np.save('data/hash_label.npy', trainlabel)
 
 	def queryhash(self, qdata):
+		if self.classifier == 'CNN':
+			return self.cls.predict(qdata)
 		Kdata = self.kernel(qdata, self.anchors)
 		Kdata -= self.mvec
 		Y = np.dot(Kdata, self.W) + self.b
@@ -222,5 +243,36 @@ def test():
 	res = hash_evaluation(H_test, H_base, gnd_truth, 59000)
 	print 'MAP:', res['map']
 
+
+def test_cnn():
+	np.random.seed(17)
+	X = np.load('cifar10_data/cifar10_data.npy')
+	Y = np.load('cifar10_data/cifar10_label.npy')
+
+	traindata = X[:5000]
+	trainlabel = Y[:5000]
+	basedata = X[:59000]
+	baselabel = Y[:59000]
+	testdata = X[59000:]
+	testlabel = Y[59000:]
+
+	# train model
+	dksh = Sparse_DKSH(64, 1000, 10, RBF)
+	tic = time.time()
+	dksh.train(traindata, trainlabel)
+	toc = time.time()
+	print 'time:', toc-tic
+
+	H_test = dksh.queryhash(testdata)
+	H_base = dksh.queryhash(basedata)
+
+	# make labels
+	gnd_truth = np.array([y == baselabel for y in testlabel]).astype(np.int8)
+
+	print 'testing...'
+
+	res = hash_evaluation(H_test, H_base, gnd_truth, 59000)
+	print 'MAP:', res['map']
+
 if __name__ == "__main__":
-	test()
+	test_cnn()
